@@ -1,0 +1,12 @@
+syntax = "proto3";
+
+package mcpprotobridge.examples.fraud.v1;
+
+option go_package = "github.com/akshay/mcp-proto-bridge/generated/fraudpb;fraudpb";
+
+message FraudCheckResponse {
+  double risk_score = 1;
+  string decision = 2;
+  string reason = 3;
+}
+
