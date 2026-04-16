@@ -212,6 +212,29 @@ make lint
 make proto
 ```
 
+## Real Python MCP Integration Test
+
+The repository includes an integration fixture in [`integration/python_mcp`](integration/python_mcp) that starts a real Python MCP server over stdio, calls it with the MCP Python SDK client, captures the actual `CallToolResult` JSON, and then verifies that the Go bridge decodes it.
+
+Run it with:
+
+```sh
+make integration-test
+```
+
+The target is idempotent. It creates `integration/python_mcp/.venv`, installs the Python MCP SDK from `requirements.txt`, writes the captured SDK response to `integration/python_mcp/out/real_mcp_response.json`, and runs:
+
+```sh
+go test ./tests -tags=integration -v
+```
+
+The fixture intentionally returns this real-world shape:
+
+- `content[0].type = "text"`
+- `content[0].text` contains a JSON object string
+- `structuredContent = null`
+- `isError = false`
+
 ## Limitations
 
 `mcp-proto-bridge` intentionally focuses on enterprise decoding of practical MCP tool results. It does not implement MCP transports, servers, streaming, content negotiation, or every MCP content type.

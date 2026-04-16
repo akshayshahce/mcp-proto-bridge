@@ -4,13 +4,18 @@
 // adapt their SDK's CallToolResult into these types at the service boundary.
 package types
 
+import (
+	"encoding/json"
+	"fmt"
+)
+
 // CallToolResult is the subset of the MCP CallToolResult shape used by this
 // library.
 type CallToolResult struct {
-	Content           []ContentBlock
-	StructuredContent map[string]any
-	IsError           bool
-	Meta              map[string]any
+	Content           []ContentBlock `json:"content"`
+	StructuredContent map[string]any `json:"structuredContent,omitempty"`
+	IsError           bool           `json:"isError,omitempty"`
+	Meta              map[string]any `json:"_meta,omitempty"`
 }
 
 // ContentBlock is implemented by supported MCP content blocks.
@@ -18,10 +23,37 @@ type ContentBlock interface {
 	ContentType() string
 }
 
+// UnmarshalJSON decodes MCP content blocks into the local supported content
+// variants. Unsupported blocks are preserved as RawContent.
+func (r *CallToolResult) UnmarshalJSON(data []byte) error {
+	var raw struct {
+		Content           []json.RawMessage `json:"content"`
+		StructuredContent map[string]any    `json:"structuredContent"`
+		IsError           bool              `json:"isError"`
+		Meta              map[string]any    `json:"_meta"`
+	}
+	if err := json.Unmarshal(data, &raw); err != nil {
+		return err
+	}
+
+	r.Content = make([]ContentBlock, 0, len(raw.Content))
+	for i, block := range raw.Content {
+		decoded, err := decodeContentBlock(block)
+		if err != nil {
+			return fmt.Errorf("decode content[%d]: %w", i, err)
+		}
+		r.Content = append(r.Content, decoded)
+	}
+	r.StructuredContent = raw.StructuredContent
+	r.IsError = raw.IsError
+	r.Meta = raw.Meta
+	return nil
+}
+
 // TextContent represents MCP text content.
 type TextContent struct {
-	Type string
-	Text string
+	Type string `json:"type"`
+	Text string `json:"text"`
 }
 
 // ContentType returns the MCP content type.
@@ -35,10 +67,36 @@ func (t TextContent) ContentType() string {
 // RawContent preserves unsupported content blocks for callers that want to keep
 // metadata around while still allowing the bridge to report unsupported content.
 type RawContent struct {
-	Type string
-	Data any
+	Type string `json:"type"`
+	Data any    `json:"data,omitempty"`
 }
 
 // ContentType returns the MCP content type.
 func (r RawContent) ContentType() string { return r.Type }
 
+func decodeContentBlock(data json.RawMessage) (ContentBlock, error) {
+	var header struct {
+		Type string `json:"type"`
+	}
+	if err := json.Unmarshal(data, &header); err != nil {
+		return nil, err
+	}
+
+	switch header.Type {
+	case "text", "":
+		var text TextContent
+		if err := json.Unmarshal(data, &text); err != nil {
+			return nil, err
+		}
+		if text.Type == "" {
+			text.Type = "text"
+		}
+		return text, nil
+	default:
+		var payload map[string]any
+		if err := json.Unmarshal(data, &payload); err != nil {
+			return nil, err
+		}
+		return RawContent{Type: header.Type, Data: payload}, nil
+	}
+}
