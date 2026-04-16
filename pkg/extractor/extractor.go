@@ -46,12 +46,16 @@ func (FirstJSONTextExtractor) Extract(result *types.CallToolResult) (any, error)
 		return nil, bridgeerrors.ErrNoStructuredPayload
 	}
 
+	var firstParseErr error
+	var sawUnsupported bool
 	for i, block := range result.Content {
 		text, ok := asTextContent(block)
 		if !ok {
+			sawUnsupported = true
 			continue
 		}
 		if text.ContentType() != "text" {
+			sawUnsupported = true
 			continue
 		}
 
@@ -64,17 +68,32 @@ func (FirstJSONTextExtractor) Extract(result *types.CallToolResult) (any, error)
 		decoder := json.NewDecoder(strings.NewReader(trimmed))
 		decoder.UseNumber()
 		if err := decoder.Decode(&payload); err != nil {
-			return nil, fmt.Errorf("%w at content[%d]: %v", bridgeerrors.ErrInvalidJSONTextContent, i, err)
+			if firstParseErr == nil {
+				firstParseErr = fmt.Errorf("%w at content[%d]: %v", bridgeerrors.ErrInvalidJSONTextContent, i, err)
+			}
+			continue
 		}
 		var extra any
 		if err := decoder.Decode(&extra); err == nil {
-			return nil, fmt.Errorf("%w at content[%d]: trailing JSON content", bridgeerrors.ErrInvalidJSONTextContent, i)
+			if firstParseErr == nil {
+				firstParseErr = fmt.Errorf("%w at content[%d]: trailing JSON content", bridgeerrors.ErrInvalidJSONTextContent, i)
+			}
+			continue
 		} else if !errors.Is(err, io.EOF) {
-			return nil, fmt.Errorf("%w at content[%d]: trailing JSON content: %v", bridgeerrors.ErrInvalidJSONTextContent, i, err)
+			if firstParseErr == nil {
+				firstParseErr = fmt.Errorf("%w at content[%d]: trailing JSON content: %v", bridgeerrors.ErrInvalidJSONTextContent, i, err)
+			}
+			continue
 		}
 		return payload, nil
 	}
 
+	if firstParseErr != nil {
+		return nil, firstParseErr
+	}
+	if sawUnsupported {
+		return nil, fmt.Errorf("%w: content contains no supported text JSON payload", bridgeerrors.ErrUnsupportedContentType)
+	}
 	return nil, bridgeerrors.ErrNoStructuredPayload
 }
 
@@ -84,6 +103,12 @@ type CompositeExtractor struct {
 }
 
 // Extract returns the first successful extracted payload.
+//
+// Soft-stop errors (ErrNoStructuredPayload, ErrUnsupportedContentType,
+// ErrInvalidJSONTextContent) allow the next extractor to be tried. All other
+// errors are hard stops that propagate immediately. This ensures that
+// WithPreferStructuredContent(false) can still fall back to structuredContent
+// when text content is absent, unsupported, or malformed.
 func (c CompositeExtractor) Extract(result *types.CallToolResult) (any, error) {
 	var lastErr error
 	for _, ext := range c.Extractors {
@@ -94,7 +119,7 @@ func (c CompositeExtractor) Extract(result *types.CallToolResult) (any, error) {
 		if err == nil {
 			return payload, nil
 		}
-		if err != bridgeerrors.ErrNoStructuredPayload {
+		if !isSoftStopError(err) {
 			return nil, err
 		}
 		lastErr = err
@@ -103,6 +128,14 @@ func (c CompositeExtractor) Extract(result *types.CallToolResult) (any, error) {
 		return nil, lastErr
 	}
 	return nil, bridgeerrors.ErrNoStructuredPayload
+}
+
+// isSoftStopError reports whether err is a signal that the extractor found
+// nothing useful but a fallback extractor should still be tried.
+func isSoftStopError(err error) bool {
+	return errors.Is(err, bridgeerrors.ErrNoStructuredPayload) ||
+		errors.Is(err, bridgeerrors.ErrUnsupportedContentType) ||
+		errors.Is(err, bridgeerrors.ErrInvalidJSONTextContent)
 }
 
 func looksLikeJSON(s string) bool {

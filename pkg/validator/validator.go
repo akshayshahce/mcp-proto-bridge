@@ -53,8 +53,17 @@ func validateValue(value reflect.Value, prefix string) error {
 }
 
 func hasRequiredTag(field reflect.StructField) bool {
-	return strings.Contains(field.Tag.Get("bridge"), "required") ||
-		strings.Contains(field.Tag.Get("validate"), "required")
+	return tagHasToken(field.Tag.Get("bridge"), "required") ||
+		tagHasToken(field.Tag.Get("validate"), "required")
+}
+
+func tagHasToken(tag string, want string) bool {
+	for _, token := range strings.Split(tag, ",") {
+		if strings.TrimSpace(token) == want {
+			return true
+		}
+	}
+	return false
 }
 
 func jsonName(field reflect.StructField) string {
@@ -75,4 +84,3 @@ func isZero(value reflect.Value) bool {
 	}
 	return value.IsZero()
 }
-

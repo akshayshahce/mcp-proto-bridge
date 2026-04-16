@@ -4,6 +4,7 @@ package bridge
 
 import (
 	"fmt"
+	"reflect"
 
 	bridgeconfig "github.com/akshay/mcp-proto-bridge/pkg/config"
 	bridgeerrors "github.com/akshay/mcp-proto-bridge/pkg/errors"
@@ -38,6 +39,16 @@ func Decode(result *types.CallToolResult, out any, opts ...Option) error {
 
 // DecodeAs extracts an MCP result payload and returns a decoded value.
 func DecodeAs[T any](result *types.CallToolResult, opts ...Option) (T, error) {
+	targetType := reflect.TypeOf((*T)(nil)).Elem()
+	if targetType.Kind() == reflect.Pointer {
+		target := reflect.New(targetType.Elem())
+		if err := Decode(result, target.Interface(), opts...); err != nil {
+			var zero T
+			return zero, err
+		}
+		return target.Interface().(T), nil
+	}
+
 	var out T
 	err := Decode(result, &out, opts...)
 	return out, err

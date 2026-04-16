@@ -15,8 +15,8 @@ var (
 	// not be parsed.
 	ErrInvalidJSONTextContent = stderrors.New("invalid JSON text content")
 
-	// ErrUnsupportedContentType means the extractor encountered a content type
-	// it does not support.
+	// ErrUnsupportedContentType means content blocks were present but none were
+	// usable and at least one unsupported non-text block was encountered.
 	ErrUnsupportedContentType = stderrors.New("unsupported content type")
 
 	// ErrValidationFailed means the decoded payload failed validation.
@@ -39,4 +39,3 @@ func (e FieldError) Error() string {
 	}
 	return e.Field + ": " + e.Message
 }
-

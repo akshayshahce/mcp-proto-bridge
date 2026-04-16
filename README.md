@@ -173,7 +173,7 @@ Errors:
 - `ErrToolReturnedError`
 - `ErrNoStructuredPayload`
 - `ErrInvalidJSONTextContent`
-- `ErrUnsupportedContentType`
+- `ErrUnsupportedContentType` when only unsupported non-text content blocks are available
 - `ErrValidationFailed`
 - `ErrFieldMappingFailed`
 

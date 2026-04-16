@@ -4,6 +4,7 @@
 bin/
 coverage.out
 dist/
+.gocache/
 integration/python_mcp/.venv/
 integration/python_mcp/out/*.json
 
