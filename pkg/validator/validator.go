@@ -20,13 +20,49 @@ func ValidateRequired(out any) error {
 }
 
 func validateValue(value reflect.Value, prefix string) error {
+	if !value.IsValid() {
+		return nil
+	}
+	if value.Kind() == reflect.Interface {
+		if value.IsNil() {
+			return nil
+		}
+		return validateValue(value.Elem(), prefix)
+	}
 	if value.Kind() == reflect.Pointer {
 		if value.IsNil() {
 			return nil
 		}
 		value = value.Elem()
 	}
-	if value.Kind() != reflect.Struct {
+
+	switch value.Kind() {
+	case reflect.Struct:
+		// Continue into field iteration below.
+	case reflect.Slice, reflect.Array:
+		for i := 0; i < value.Len(); i++ {
+			path := fmt.Sprintf("%s[%d]", prefix, i)
+			if prefix == "" {
+				path = fmt.Sprintf("[%d]", i)
+			}
+			if err := validateValue(value.Index(i), path); err != nil {
+				return err
+			}
+		}
+		return nil
+	case reflect.Map:
+		iter := value.MapRange()
+		for iter.Next() {
+			path := fmt.Sprintf("%s[%v]", prefix, iter.Key().Interface())
+			if prefix == "" {
+				path = fmt.Sprintf("[%v]", iter.Key().Interface())
+			}
+			if err := validateValue(iter.Value(), path); err != nil {
+				return err
+			}
+		}
+		return nil
+	default:
 		return nil
 	}
 

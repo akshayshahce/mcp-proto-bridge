@@ -16,16 +16,53 @@ from mcp.types import CallToolResult, TextContent
 mcp = FastMCP("mcp-proto-bridge-integration")
 
 
-@mcp.tool(structured_output=False)
-def create_order(user_id: str, amount: float) -> CallToolResult:
-    """Create an order for the integration test."""
-    payload = {
+def _order_payload(amount: float) -> dict[str, object]:
+    return {
         "order_id": "ORD-123",
         "status": "confirmed",
         "amount": amount,
     }
+
+
+@mcp.tool(structured_output=False)
+def create_order_text(user_id: str, amount: float) -> CallToolResult:
+    """Create an order with JSON directly in text content."""
+    payload = _order_payload(amount)
     return CallToolResult(
         content=[
+            TextContent(
+                type="text",
+                text=json.dumps(payload, indent=2, sort_keys=True),
+            )
+        ],
+        isError=False,
+    )
+
+
+@mcp.tool(structured_output=False)
+def create_order_embedded_json(user_id: str, amount: float) -> CallToolResult:
+    """Create an order with JSON embedded in markdown text."""
+    payload = _order_payload(amount)
+    return CallToolResult(
+        content=[
+            TextContent(
+                type="text",
+                text="tool output:\n```json\n"
+                + json.dumps(payload, indent=2, sort_keys=True)
+                + "\n```",
+            )
+        ],
+        isError=False,
+    )
+
+
+@mcp.tool(structured_output=False)
+def create_order_malformed_then_valid(user_id: str, amount: float) -> CallToolResult:
+    """Create an order with malformed JSON-like text followed by valid JSON."""
+    payload = _order_payload(amount)
+    return CallToolResult(
+        content=[
+            TextContent(type="text", text='{"order_id":'),
             TextContent(
                 type="text",
                 text=json.dumps(payload, indent=2, sort_keys=True),

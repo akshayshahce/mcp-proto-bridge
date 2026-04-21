@@ -1,7 +1,9 @@
 package tests
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 
@@ -9,6 +11,7 @@ import (
 	"github.com/akshay/mcp-proto-bridge/generated/orderpb"
 	"github.com/akshay/mcp-proto-bridge/pkg/bridge"
 	bridgeerrors "github.com/akshay/mcp-proto-bridge/pkg/errors"
+	"github.com/akshay/mcp-proto-bridge/pkg/extractor"
 	"github.com/akshay/mcp-proto-bridge/pkg/types"
 )
 
@@ -49,6 +52,54 @@ func TestTextContentJSONSuccessPath(t *testing.T) {
 	}
 	if out.OrderID != "ORD-123" {
 		t.Fatalf("expected order id ORD-123, got %q", out.OrderID)
+	}
+}
+
+func TestTextContentEmbeddedJSONHonorsIndentDetection(t *testing.T) {
+	text := "tool output:\n```json\n{\n  \"order_id\": \"ORD-123\",\n  \"status\": \"confirmed\",\n  \"amount\": 50.0\n}\n```"
+	result := &types.CallToolResult{
+		Content: []types.ContentBlock{
+			types.TextContent{Type: "text", Text: text},
+		},
+	}
+
+	t.Run("enabled", func(t *testing.T) {
+		var out createOrder
+		if err := bridge.Decode(result, &out, bridge.WithJSONIndentDetection(true)); err != nil {
+			t.Fatalf("Decode returned error: %v", err)
+		}
+		if out.OrderID != "ORD-123" {
+			t.Fatalf("unexpected decoded value: %+v", out)
+		}
+	})
+
+	t.Run("disabled", func(t *testing.T) {
+		var out createOrder
+		err := bridge.Decode(result, &out, bridge.WithJSONIndentDetection(false))
+		if !errors.Is(err, bridgeerrors.ErrNoStructuredPayload) {
+			t.Fatalf("expected ErrNoStructuredPayload, got %v", err)
+		}
+	})
+}
+
+func TestMalformedStructuredContentFallsBackToText(t *testing.T) {
+	payload := []byte(`{
+		"structuredContent": ["not", "an", "object"],
+		"content": [{"type": "text", "text": "{\"order_id\":\"ORD-123\",\"status\":\"confirmed\",\"amount\":50}"}],
+		"isError": false
+	}`)
+
+	var result types.CallToolResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatalf("unexpected unmarshal failure: %v", err)
+	}
+
+	var out createOrder
+	if err := bridge.Decode(&result, &out, bridge.WithStrictMode(true)); err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	if out.OrderID != "ORD-123" || out.Status != "confirmed" {
+		t.Fatalf("unexpected decoded value: %+v", out)
 	}
 }
 
@@ -222,6 +273,34 @@ func TestMissingRequiredFields(t *testing.T) {
 	}
 }
 
+func TestNestedSliceValidationEnforced(t *testing.T) {
+	type lineItem struct {
+		SKU string `json:"sku" bridge:"required"`
+	}
+	type response struct {
+		OrderID string     `json:"order_id" bridge:"required"`
+		Items   []lineItem `json:"items"`
+	}
+
+	result := &types.CallToolResult{
+		StructuredContent: map[string]any{
+			"order_id": "ORD-123",
+			"items": []any{
+				map[string]any{},
+			},
+		},
+	}
+
+	var out response
+	err := bridge.Decode(result, &out)
+	if !errors.Is(err, bridgeerrors.ErrValidationFailed) {
+		t.Fatalf("expected ErrValidationFailed, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "items[0].sku") {
+		t.Fatalf("expected path to include items[0].sku, got %v", err)
+	}
+}
+
 func TestValidateRequiredTagExactTokens(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -344,6 +423,49 @@ func TestAliasMapping(t *testing.T) {
 	}
 }
 
+func TestAliasCollisionExplicitTargetWins(t *testing.T) {
+	result := &types.CallToolResult{
+		StructuredContent: map[string]any{
+			"id":       "ORD-ALISED",
+			"order_id": "ORD-EXPLICIT",
+			"status":   "confirmed",
+		},
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out, bridge.WithFieldAliases(map[string]string{
+		"id": "order_id",
+	}))
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	if out.OrderID != "ORD-EXPLICIT" {
+		t.Fatalf("expected explicit target value to win, got %q", out.OrderID)
+	}
+}
+
+func TestAliasCollisionMultipleSourcesDeterministic(t *testing.T) {
+	result := &types.CallToolResult{
+		StructuredContent: map[string]any{
+			"a":      "ORD-A",
+			"b":      "ORD-B",
+			"status": "confirmed",
+		},
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out, bridge.WithFieldAliases(map[string]string{
+		"a": "order_id",
+		"b": "order_id",
+	}))
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	if out.OrderID != "ORD-A" {
+		t.Fatalf("expected deterministic first source value ORD-A, got %q", out.OrderID)
+	}
+}
+
 func TestStrictModeRejectsUnknownFields(t *testing.T) {
 	result := &types.CallToolResult{
 		StructuredContent: map[string]any{
@@ -407,6 +529,55 @@ func TestProtoStrictModeRejectsUnknownFields(t *testing.T) {
 	err := bridge.DecodeProto(result, &out, bridge.WithStrictMode(true))
 	if !errors.Is(err, bridgeerrors.ErrFieldMappingFailed) {
 		t.Fatalf("expected ErrFieldMappingFailed, got %v", err)
+	}
+}
+
+func TestDecodeRejectsNonPointerOutput(t *testing.T) {
+	result := orderResult()
+	out := createOrder{}
+	err := bridge.Decode(result, out)
+	if !errors.Is(err, bridgeerrors.ErrFieldMappingFailed) {
+		t.Fatalf("expected ErrFieldMappingFailed, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "output must be a pointer") {
+		t.Fatalf("expected explicit pointer error, got %v", err)
+	}
+}
+
+func TestDecodeProtoRejectsTypedNilPointerOutput(t *testing.T) {
+	result := orderResult()
+	var out *orderpb.CreateOrderResponse
+	err := bridge.DecodeProto(result, out)
+	if !errors.Is(err, bridgeerrors.ErrFieldMappingFailed) {
+		t.Fatalf("expected ErrFieldMappingFailed, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "proto output pointer must be non-nil") {
+		t.Fatalf("expected explicit non-nil proto pointer error, got %v", err)
+	}
+}
+
+func TestCustomCompositeExtractorWrappedNoPayloadFallsBack(t *testing.T) {
+	result := &types.CallToolResult{
+		StructuredContent: map[string]any{
+			"order_id": "ORD-123",
+			"status":   "confirmed",
+			"amount":   50.0,
+		},
+	}
+
+	ext := extractor.CompositeExtractor{Extractors: []extractor.Extractor{
+		extractor.ExtractorFunc(func(*types.CallToolResult) (any, error) {
+			return nil, fmt.Errorf("%w: upstream did not emit payload", bridgeerrors.ErrNoStructuredPayload)
+		}),
+		extractor.PreferStructuredExtractor{},
+	}}
+
+	var out createOrder
+	if err := bridge.Decode(result, &out, bridge.WithCustomExtractor(ext)); err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	if out.OrderID != "ORD-123" {
+		t.Fatalf("unexpected decoded value: %+v", out)
 	}
 }
 
@@ -492,6 +663,52 @@ func TestEmptyResultHandling(t *testing.T) {
 	err := bridge.Decode(&types.CallToolResult{}, &out)
 	if !errors.Is(err, bridgeerrors.ErrNoStructuredPayload) {
 		t.Fatalf("expected ErrNoStructuredPayload, got %v", err)
+	}
+}
+
+func TestMalformedContentBlocksArePreservedAndDoNotAbortDecode(t *testing.T) {
+	payload := []byte(`{
+		"content": [
+			123,
+			{"type":"text","text":"{\"order_id\":\"ORD-123\",\"status\":\"confirmed\",\"amount\":50}"}
+		],
+		"isError": false
+	}`)
+
+	var result types.CallToolResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatalf("expected tolerant unmarshal for malformed content block, got: %v", err)
+	}
+
+	var out createOrder
+	if err := bridge.Decode(&result, &out, bridge.WithStrictMode(true)); err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	if out.OrderID != "ORD-123" || out.Status != "confirmed" {
+		t.Fatalf("unexpected decoded value: %+v", out)
+	}
+}
+
+func TestMalformedTextBlockShapeDoesNotAbortDecode(t *testing.T) {
+	payload := []byte(`{
+		"content": [
+			{"type":"text","text":123},
+			{"type":"text","text":"{\"order_id\":\"ORD-123\",\"status\":\"confirmed\",\"amount\":50}"}
+		],
+		"isError": false
+	}`)
+
+	var result types.CallToolResult
+	if err := json.Unmarshal(payload, &result); err != nil {
+		t.Fatalf("expected tolerant unmarshal for malformed text block, got: %v", err)
+	}
+
+	var out createOrder
+	if err := bridge.Decode(&result, &out, bridge.WithStrictMode(true)); err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	if out.OrderID != "ORD-123" || out.Status != "confirmed" {
+		t.Fatalf("unexpected decoded value: %+v", out)
 	}
 }
 

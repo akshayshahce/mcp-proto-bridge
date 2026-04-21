@@ -4,6 +4,7 @@ package tests
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -24,51 +25,71 @@ type integrationOrderResponse struct {
 func TestRealPythonMCPResponseDecode(t *testing.T) {
 	root := repoRoot(t)
 	fixtureDir := filepath.Join(root, "integration", "python_mcp")
-	outPath := filepath.Join(fixtureDir, "out", "real_mcp_response.json")
 
-	runPythonCapture(t, fixtureDir, outPath)
-
-	data, err := os.ReadFile(outPath)
-	if err != nil {
-		t.Fatalf("read captured MCP response %s: %v", outPath, err)
+	tests := []struct {
+		name                      string
+		tool                      string
+		injectMalformedStructured bool
+		decodeOpts                []bridge.Option
+	}{
+		{
+			name:       "text_json",
+			tool:       "create_order_text",
+			decodeOpts: []bridge.Option{bridge.WithStrictMode(true)},
+		},
+		{
+			name:       "embedded_json_text",
+			tool:       "create_order_embedded_json",
+			decodeOpts: []bridge.Option{bridge.WithStrictMode(true), bridge.WithJSONIndentDetection(true)},
+		},
+		{
+			name:       "malformed_then_valid_text",
+			tool:       "create_order_malformed_then_valid",
+			decodeOpts: []bridge.Option{bridge.WithStrictMode(true)},
+		},
+		{
+			name:                      "malformed_structuredcontent_falls_back_to_text",
+			tool:                      "create_order_text",
+			injectMalformedStructured: true,
+			decodeOpts:                []bridge.Option{bridge.WithStrictMode(true)},
+		},
 	}
 
-	var result types.CallToolResult
-	if err := json.Unmarshal(data, &result); err != nil {
-		t.Fatalf("unmarshal captured MCP response into types.CallToolResult: %v\npayload:\n%s", err, data)
-	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			outPath := filepath.Join(fixtureDir, "out", fmt.Sprintf("real_mcp_response_%s.json", tc.name))
+			runPythonCapture(t, fixtureDir, outPath, tc.tool, tc.injectMalformedStructured)
 
-	if result.IsError {
-		t.Fatalf("expected isError=false in real MCP response")
-	}
-	if len(result.StructuredContent) != 0 {
-		t.Fatalf("expected structuredContent to be null or empty, got %#v", result.StructuredContent)
-	}
-	if len(result.Content) != 1 {
-		t.Fatalf("expected one content block, got %d", len(result.Content))
-	}
-	text, ok := result.Content[0].(types.TextContent)
-	if !ok {
-		t.Fatalf("expected content[0] to decode as types.TextContent, got %T", result.Content[0])
-	}
-	if text.ContentType() != "text" || text.Text == "" {
-		t.Fatalf("unexpected text content: %#v", text)
-	}
+			data, err := os.ReadFile(outPath)
+			if err != nil {
+				t.Fatalf("read captured MCP response %s: %v", outPath, err)
+			}
 
-	var structOut integrationOrderResponse
-	if err := bridge.Decode(&result, &structOut, bridge.WithStrictMode(true)); err != nil {
-		t.Fatalf("Decode from real MCP response failed: %v", err)
-	}
-	assertOrder(t, structOut.OrderID, structOut.Status, structOut.Amount)
+			var result types.CallToolResult
+			if err := json.Unmarshal(data, &result); err != nil {
+				t.Fatalf("unmarshal captured MCP response into types.CallToolResult: %v\npayload:\n%s", err, data)
+			}
 
-	var protoOut orderpb.CreateOrderResponse
-	if err := bridge.DecodeProto(&result, &protoOut, bridge.WithStrictMode(true)); err != nil {
-		t.Fatalf("DecodeProto from real MCP response failed: %v", err)
+			if result.IsError {
+				t.Fatalf("expected isError=false in real MCP response")
+			}
+
+			var structOut integrationOrderResponse
+			if err := bridge.Decode(&result, &structOut, tc.decodeOpts...); err != nil {
+				t.Fatalf("Decode from real MCP response failed: %v", err)
+			}
+			assertOrder(t, structOut.OrderID, structOut.Status, structOut.Amount)
+
+			var protoOut orderpb.CreateOrderResponse
+			if err := bridge.DecodeProto(&result, &protoOut, tc.decodeOpts...); err != nil {
+				t.Fatalf("DecodeProto from real MCP response failed: %v", err)
+			}
+			assertOrder(t, protoOut.GetOrderId(), protoOut.GetStatus(), protoOut.GetAmount())
+		})
 	}
-	assertOrder(t, protoOut.GetOrderId(), protoOut.GetStatus(), protoOut.GetAmount())
 }
 
-func runPythonCapture(t *testing.T, fixtureDir, outPath string) {
+func runPythonCapture(t *testing.T, fixtureDir, outPath, tool string, injectMalformedStructured bool) {
 	t.Helper()
 
 	python := os.Getenv("PYTHON_BIN")
@@ -82,7 +103,11 @@ func runPythonCapture(t *testing.T, fixtureDir, outPath string) {
 	}
 
 	script := filepath.Join(fixtureDir, "client_capture.py")
-	cmd := exec.Command(python, script, "--out", outPath)
+	args := []string{script, "--out", outPath, "--tool", tool}
+	if injectMalformedStructured {
+		args = append(args, "--inject-malformed-structured")
+	}
+	cmd := exec.Command(python, args...)
 	cmd.Dir = fixtureDir
 	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
 	output, err := cmd.CombinedOutput()

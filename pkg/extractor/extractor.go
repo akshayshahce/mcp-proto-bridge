@@ -2,6 +2,7 @@
 package extractor
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -38,10 +39,14 @@ func (PreferStructuredExtractor) Extract(result *types.CallToolResult) (any, err
 
 // FirstJSONTextExtractor finds the first text block containing a JSON object or
 // array and decodes it.
-type FirstJSONTextExtractor struct{}
+type FirstJSONTextExtractor struct {
+	// EnableIndentDetection allows scanning text blocks for embedded JSON
+	// objects/arrays, such as markdown fenced blocks and indented snippets.
+	EnableIndentDetection bool
+}
 
 // Extract returns the first JSON object or array found in text content.
-func (FirstJSONTextExtractor) Extract(result *types.CallToolResult) (any, error) {
+func (f FirstJSONTextExtractor) Extract(result *types.CallToolResult) (any, error) {
 	if result == nil || len(result.Content) == 0 {
 		return nil, bridgeerrors.ErrNoStructuredPayload
 	}
@@ -60,12 +65,24 @@ func (FirstJSONTextExtractor) Extract(result *types.CallToolResult) (any, error)
 		}
 
 		trimmed := strings.TrimSpace(text.Text)
+		candidate := trimmed
 		if !looksLikeJSON(trimmed) {
+			if !f.EnableIndentDetection {
+				continue
+			}
+			embedded, ok := firstEmbeddedJSONObjectOrArray(trimmed)
+			if !ok {
+				continue
+			}
+			candidate = embedded
+		}
+
+		if strings.TrimSpace(candidate) == "" {
 			continue
 		}
 
 		var payload any
-		decoder := json.NewDecoder(strings.NewReader(trimmed))
+		decoder := json.NewDecoder(strings.NewReader(candidate))
 		decoder.UseNumber()
 		if err := decoder.Decode(&payload); err != nil {
 			if firstParseErr == nil {
@@ -140,6 +157,64 @@ func isSoftStopError(err error) bool {
 
 func looksLikeJSON(s string) bool {
 	return strings.HasPrefix(s, "{") || strings.HasPrefix(s, "[")
+}
+
+func firstEmbeddedJSONObjectOrArray(s string) (string, bool) {
+	start := -1
+	for i := 0; i < len(s); i++ {
+		if s[i] == '{' || s[i] == '[' {
+			start = i
+			break
+		}
+	}
+	if start == -1 {
+		return "", false
+	}
+
+	inString := false
+	escape := false
+	stack := make([]byte, 0, 8)
+
+	for i := start; i < len(s); i++ {
+		ch := s[i]
+		if inString {
+			if escape {
+				escape = false
+				continue
+			}
+			if ch == '\\' {
+				escape = true
+				continue
+			}
+			if ch == '"' {
+				inString = false
+			}
+			continue
+		}
+
+		switch ch {
+		case '"':
+			inString = true
+		case '{', '[':
+			stack = append(stack, ch)
+		case '}':
+			if len(stack) == 0 || stack[len(stack)-1] != '{' {
+				return "", false
+			}
+			stack = stack[:len(stack)-1]
+		case ']':
+			if len(stack) == 0 || stack[len(stack)-1] != '[' {
+				return "", false
+			}
+			stack = stack[:len(stack)-1]
+		}
+
+		if len(stack) == 0 {
+			return strings.TrimSpace(string(bytes.TrimSpace([]byte(s[start : i+1])))), true
+		}
+	}
+
+	return "", false
 }
 
 func asTextContent(block types.ContentBlock) (types.TextContent, bool) {

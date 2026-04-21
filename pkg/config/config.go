@@ -68,14 +68,22 @@ func WithAllowUnknownFields(allow bool) Option {
 }
 
 // WithCustomExtractor uses a caller-provided extractor.
+//
+// Pass an extractor.CompositeExtractor if you want ordered fallback behavior.
+// In that case, extractor errors wrapped with these sentinels are treated as
+// soft-stop signals by CompositeExtractor and allow the next extractor to run:
+// - bridgeerrors.ErrNoStructuredPayload
+// - bridgeerrors.ErrUnsupportedContentType
+// - bridgeerrors.ErrInvalidJSONTextContent
 func WithCustomExtractor(ext extractor.Extractor) Option {
 	return func(cfg *Config) {
 		cfg.Extractor = ext
 	}
 }
 
-// WithJSONIndentDetection is reserved for future text extraction heuristics.
-// It is kept as an option so early adopters do not need to change call sites.
+// WithJSONIndentDetection enables scanning text content for embedded JSON
+// objects/arrays (for example, markdown fenced code blocks) when text does not
+// start directly with '{' or '['.
 func WithJSONIndentDetection(enabled bool) Option {
 	return func(cfg *Config) {
 		cfg.JSONIndentDetection = enabled
@@ -88,4 +96,3 @@ func WithTargetName(name string) Option {
 		cfg.TargetName = name
 	}
 }
-

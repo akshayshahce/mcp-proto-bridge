@@ -109,6 +109,11 @@ err := bridge.DecodeProto(
 )
 ```
 
+Alias conflict policy is deterministic:
+
+- if both a source key and its target key are present, the explicit target key wins
+- if multiple source keys map to the same target key, the first source key in sorted key order wins
+
 ## MCP Response Shapes Supported In v1
 
 Supported:
@@ -116,7 +121,11 @@ Supported:
 - `structuredContent` as a JSON object
 - `TextContent.text` containing a JSON object
 - `TextContent.text` containing a JSON array
+- `TextContent.text` containing embedded JSON (for example fenced markdown JSON) when `WithJSONIndentDetection(true)`
 - multiple content blocks where one text block contains JSON
+- malformed JSON-looking text blocks followed by later valid JSON text blocks
+- malformed/non-object `structuredContent` fallback to text decoding
+- malformed/unknown content blocks preserved as raw blocks without aborting full result unmarshal
 - local MCP-like types for SDK-neutral integration
 - custom extractor hooks
 
@@ -168,12 +177,24 @@ Options:
 - `WithJSONIndentDetection(bool)`
 - `WithTargetName(string)`
 
+Output argument contract:
+
+- `Decode` requires a non-nil pointer output
+- `DecodeProto` requires a non-nil protobuf message output (typed-nil pointers are rejected)
+
+Custom extractor fallback contract:
+
+- when using `extractor.CompositeExtractor`, wrapped soft-stop errors continue fallback to the next extractor:
+	- `ErrNoStructuredPayload`
+	- `ErrUnsupportedContentType`
+	- `ErrInvalidJSONTextContent`
+
 Errors:
 
 - `ErrToolReturnedError`
 - `ErrNoStructuredPayload`
 - `ErrInvalidJSONTextContent`
-- `ErrUnsupportedContentType` when only unsupported non-text content blocks are available
+- `ErrUnsupportedContentType` when no usable text JSON payload is found and unsupported non-text content blocks were encountered
 - `ErrValidationFailed`
 - `ErrFieldMappingFailed`
 
@@ -228,12 +249,12 @@ The target is idempotent. It creates `integration/python_mcp/.venv`, installs th
 go test ./tests -tags=integration -v
 ```
 
-The fixture intentionally returns this real-world shape:
+The integration test covers a scenario matrix with real Python MCP responses:
 
-- `content[0].type = "text"`
-- `content[0].text` contains a JSON object string
-- `structuredContent = null`
-- `isError = false`
+- direct text JSON payload
+- embedded JSON inside text content (decoded with `WithJSONIndentDetection(true)`)
+- malformed JSON-like text block followed by later valid JSON block
+- malformed `structuredContent` with fallback to valid text payload
 
 ## Limitations
 

@@ -15,6 +15,7 @@ from mcp.client.stdio import stdio_client
 
 FIXTURE_DIR = Path(__file__).resolve().parent
 DEFAULT_OUT = FIXTURE_DIR / "out" / "real_mcp_response.json"
+DEFAULT_TOOL = "create_order_text"
 
 
 def result_to_jsonable(result: Any) -> dict[str, Any]:
@@ -26,7 +27,7 @@ def result_to_jsonable(result: Any) -> dict[str, Any]:
     raise TypeError(f"unsupported CallToolResult type: {type(result)!r}")
 
 
-async def capture(out_path: Path) -> None:
+async def capture(out_path: Path, tool: str, inject_malformed_structured: bool) -> None:
     server_path = FIXTURE_DIR / "server.py"
     server_params = StdioServerParameters(
         command=sys.executable,
@@ -42,11 +43,14 @@ async def capture(out_path: Path) -> None:
             print(f"available_tools={tool_names}")
 
             result = await session.call_tool(
-                "create_order",
+                tool,
                 arguments={"user_id": "USR-1", "amount": 50.0},
             )
 
     payload = result_to_jsonable(result)
+    if inject_malformed_structured:
+        payload["structuredContent"] = ["malformed", "structured", "content"]
+
     out_path.parent.mkdir(parents=True, exist_ok=True)
     out_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -62,8 +66,10 @@ async def capture(out_path: Path) -> None:
 def main() -> None:
     parser = argparse.ArgumentParser()
     parser.add_argument("--out", type=Path, default=DEFAULT_OUT)
+    parser.add_argument("--tool", default=DEFAULT_TOOL)
+    parser.add_argument("--inject-malformed-structured", action="store_true")
     args = parser.parse_args()
-    asyncio.run(capture(args.out.resolve()))
+    asyncio.run(capture(args.out.resolve(), args.tool, args.inject_malformed_structured))
 
 
 if __name__ == "__main__":
