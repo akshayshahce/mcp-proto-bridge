@@ -1,5 +1,8 @@
 name: copilot-ci-fix
 
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+
 on:
   workflow_run:
     workflows: ["ci"]
@@ -16,7 +19,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Create or update Copilot CI fix issue
-        uses: actions/github-script@v7
+        uses: actions/github-script@v8
         env:
           COPILOT_ASSIGNEE: ${{ vars.COPILOT_ASSIGNEE }}
         with:
@@ -24,6 +27,7 @@ jobs:
             const wr = context.payload.workflow_run ?? {};
             const owner = context.repo.owner;
             const repo = context.repo.repo;
+            const apiHeaders = { "X-GitHub-Api-Version": "2022-11-28" };
 
             const conclusion = wr.conclusion ?? "";
             if (conclusion !== "failure") {
@@ -74,6 +78,7 @@ jobs:
               state: "open",
               labels: "copilot,ci-fix",
               per_page: 100,
+              headers: apiHeaders,
             });
 
             const existing = issues.find((issue) => {
@@ -93,7 +98,7 @@ jobs:
                 `- Workflow: ${workflowName}`,
                 `- Failed Run: ${runUrl}`,
                 "",
-                "Please re-check logs and update the existing fix plan/PR accordingly.",
+                "@copilot please re-check this failure and continue the fix PR with minimal, production-safe changes.",
               ].join("\n");
 
               await github.rest.issues.createComment({
@@ -101,6 +106,7 @@ jobs:
                 repo,
                 issue_number: existing.number,
                 body: comment,
+                headers: apiHeaders,
               });
 
               core.info(`Updated existing issue #${existing.number}.`);
@@ -113,6 +119,7 @@ jobs:
               title,
               body: issueBody,
               labels: ["copilot", "ci-fix"],
+              headers: apiHeaders,
             });
 
             const candidateAssignees = [];
@@ -133,6 +140,7 @@ jobs:
                   repo,
                   issue_number: created.data.number,
                   assignees: [assignee],
+                  headers: apiHeaders,
                 });
                 core.info(`Assigned issue #${created.data.number} to '${assignee}'.`);
                 assigned = true;
@@ -142,12 +150,21 @@ jobs:
               }
             }
 
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number: created.data.number,
+              body: "@copilot please investigate this failed CI run, apply the minimal lint/test fix, and open a PR with root cause + validation details.",
+              headers: apiHeaders,
+            });
+
             if (!assigned) {
               await github.rest.issues.createComment({
                 owner,
                 repo,
                 issue_number: created.data.number,
                 body: "Assignment note: no valid Copilot assignee was found. Configure repository variable COPILOT_ASSIGNEE with a valid account if required by your org policy.",
+                headers: apiHeaders,
               });
             }
 
