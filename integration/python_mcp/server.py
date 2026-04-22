@@ -72,6 +72,36 @@ def create_order_malformed_then_valid(user_id: str, amount: float) -> CallToolRe
     )
 
 
+@mcp.tool(structured_output=False)
+def create_order_tool_error(user_id: str, amount: float) -> CallToolResult:
+    """Return a tool-level error payload."""
+    return CallToolResult(
+        content=[
+            TextContent(
+                type="text",
+                text="permission denied for order creation",
+            )
+        ],
+        isError=True,
+    )
+
+
+@mcp.tool(structured_output=False)
+def create_order_unknown_field(user_id: str, amount: float) -> CallToolResult:
+    """Return payload with an extra field to test strict-mode unknown handling."""
+    payload = _order_payload(amount)
+    payload["unexpected"] = True
+    return CallToolResult(
+        content=[
+            TextContent(
+                type="text",
+                text=json.dumps(payload, indent=2, sort_keys=True),
+            )
+        ],
+        isError=False,
+    )
+
+
 if __name__ == "__main__":
     mcp.run(transport="stdio")
 

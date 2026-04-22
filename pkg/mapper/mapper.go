@@ -30,24 +30,11 @@ func Decode(payload any, out any, cfg bridgeconfig.Config) error {
 	}
 
 	mapped := ApplyAliases(payload, cfg.FieldAliases)
-	data, err := json.Marshal(mapped)
-	if err != nil {
-		return fmt.Errorf("%w: marshal normalized payload: %v", bridgeerrors.ErrFieldMappingFailed, err)
+	if err := DecodeMapped(mapped, out, cfg); err != nil {
+		return err
 	}
 
-	if cfg.AllowUnknownFields {
-		if err := json.Unmarshal(data, out); err != nil {
-			return fmt.Errorf("%w: decode %s: %v", bridgeerrors.ErrFieldMappingFailed, targetName(cfg), err)
-		}
-	} else {
-		dec := json.NewDecoder(bytes.NewReader(data))
-		dec.DisallowUnknownFields()
-		if err := dec.Decode(out); err != nil {
-			return fmt.Errorf("%w: decode %s: %v", bridgeerrors.ErrFieldMappingFailed, targetName(cfg), err)
-		}
-	}
-
-	if err := validator.ValidateRequired(out); err != nil {
+	if err := ValidateDecoded(out); err != nil {
 		return err
 	}
 	return nil
@@ -64,6 +51,54 @@ func DecodeProto(payload any, out proto.Message, cfg bridgeconfig.Config) error 
 	}
 
 	mapped := ApplyAliases(payload, cfg.FieldAliases)
+	if err := DecodeProtoMapped(mapped, out, cfg); err != nil {
+		return err
+	}
+	return nil
+}
+
+// DecodeMapped decodes already-normalized payload into out.
+func DecodeMapped(mapped any, out any, cfg bridgeconfig.Config) error {
+	if out == nil {
+		return fmt.Errorf("%w: output must be non-nil", bridgeerrors.ErrFieldMappingFailed)
+	}
+	outValue := reflect.ValueOf(out)
+	if outValue.Kind() != reflect.Pointer {
+		return fmt.Errorf("%w: output must be a pointer", bridgeerrors.ErrFieldMappingFailed)
+	}
+	if outValue.IsNil() {
+		return fmt.Errorf("%w: output pointer must be non-nil", bridgeerrors.ErrFieldMappingFailed)
+	}
+
+	data, err := json.Marshal(mapped)
+	if err != nil {
+		return fmt.Errorf("%w: marshal normalized payload: %v", bridgeerrors.ErrFieldMappingFailed, err)
+	}
+
+	if cfg.AllowUnknownFields {
+		if err := json.Unmarshal(data, out); err != nil {
+			return fmt.Errorf("%w: decode %s: %v", bridgeerrors.ErrFieldMappingFailed, targetName(cfg), err)
+		}
+	} else {
+		dec := json.NewDecoder(bytes.NewReader(data))
+		dec.DisallowUnknownFields()
+		if err := dec.Decode(out); err != nil {
+			return fmt.Errorf("%w: decode %s: %v", bridgeerrors.ErrFieldMappingFailed, targetName(cfg), err)
+		}
+	}
+	return nil
+}
+
+// DecodeProtoMapped decodes already-normalized payload into a protobuf target.
+func DecodeProtoMapped(mapped any, out proto.Message, cfg bridgeconfig.Config) error {
+	if out == nil {
+		return fmt.Errorf("%w: proto output must be non-nil", bridgeerrors.ErrFieldMappingFailed)
+	}
+	outValue := reflect.ValueOf(out)
+	if outValue.Kind() == reflect.Pointer && outValue.IsNil() {
+		return fmt.Errorf("%w: proto output pointer must be non-nil", bridgeerrors.ErrFieldMappingFailed)
+	}
+
 	data, err := json.Marshal(mapped)
 	if err != nil {
 		return fmt.Errorf("%w: marshal normalized payload: %v", bridgeerrors.ErrFieldMappingFailed, err)
@@ -76,6 +111,11 @@ func DecodeProto(payload any, out proto.Message, cfg bridgeconfig.Config) error 
 		return fmt.Errorf("%w: decode proto %s: %v", bridgeerrors.ErrFieldMappingFailed, targetName(cfg), err)
 	}
 	return nil
+}
+
+// ValidateDecoded validates required tags on decoded structs.
+func ValidateDecoded(out any) error {
+	return validator.ValidateRequired(out)
 }
 
 // ApplyAliases recursively renames map keys using source -> target aliases.

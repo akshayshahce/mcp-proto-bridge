@@ -1,0 +1,41 @@
+{
+  "version": 1,
+  "mode": "decode",
+  "config": {
+    "prefer_structured_content": true,
+    "strict_mode": true,
+    "allow_unknown_fields": false,
+    "target_name": "create_order",
+    "json_indent_detection": true,
+    "safety_limits": {
+      "MaxPayloadBytes": 0,
+      "MaxNestingDepth": 0,
+      "MaxStringLength": 0,
+      "MaxCollectionLength": 0,
+      "MaxNodeCount": 0
+    },
+    "decode_policy": {
+      "OnToolError": "fail",
+      "OnNoPayload": "fail",
+      "RequiredValidation": "enforce"
+    },
+    "adaptive_routing": {
+      "Enabled": false,
+      "PreferTextWhenNoStructured": true,
+      "PreferTextWhenBothPresent": false
+    },
+    "auto_repair": {
+      "Enabled": false,
+      "MaxRepairPasses": 1
+    }
+  },
+  "result": {
+    "content": null,
+    "structuredContent": {
+      "order_id": "ORD-123"
+    }
+  },
+  "error_message": "validate: validation: validation failed: status is required",
+  "error_stage": "validate",
+  "error_class": "validation"
+}

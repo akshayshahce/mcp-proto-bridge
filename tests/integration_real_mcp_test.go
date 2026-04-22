@@ -4,6 +4,7 @@ package tests
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
@@ -13,6 +14,7 @@ import (
 
 	"github.com/akshay/mcp-proto-bridge/generated/orderpb"
 	"github.com/akshay/mcp-proto-bridge/pkg/bridge"
+	bridgeerrors "github.com/akshay/mcp-proto-bridge/pkg/errors"
 	"github.com/akshay/mcp-proto-bridge/pkg/types"
 )
 
@@ -30,28 +32,50 @@ func TestRealPythonMCPResponseDecode(t *testing.T) {
 		name                      string
 		tool                      string
 		injectMalformedStructured bool
-		decodeOpts                []bridge.Option
+		structDecodeOpts          []bridge.Option
+		protoDecodeOpts           []bridge.Option
+		expectIsError             bool
+		expectStructErr           error
+		expectProtoErr            error
 	}{
 		{
-			name:       "text_json",
-			tool:       "create_order_text",
-			decodeOpts: []bridge.Option{bridge.WithStrictMode(true)},
+			name:             "text_json",
+			tool:             "create_order_text",
+			structDecodeOpts: []bridge.Option{bridge.WithStrictMode(true)},
+			protoDecodeOpts:  []bridge.Option{bridge.WithStrictMode(true)},
 		},
 		{
-			name:       "embedded_json_text",
-			tool:       "create_order_embedded_json",
-			decodeOpts: []bridge.Option{bridge.WithStrictMode(true), bridge.WithJSONIndentDetection(true)},
+			name:             "embedded_json_text",
+			tool:             "create_order_embedded_json",
+			structDecodeOpts: []bridge.Option{bridge.WithStrictMode(true), bridge.WithJSONIndentDetection(true)},
+			protoDecodeOpts:  []bridge.Option{bridge.WithStrictMode(true), bridge.WithJSONIndentDetection(true)},
 		},
 		{
-			name:       "malformed_then_valid_text",
-			tool:       "create_order_malformed_then_valid",
-			decodeOpts: []bridge.Option{bridge.WithStrictMode(true)},
+			name:             "malformed_then_valid_text",
+			tool:             "create_order_malformed_then_valid",
+			structDecodeOpts: []bridge.Option{bridge.WithStrictMode(true)},
+			protoDecodeOpts:  []bridge.Option{bridge.WithStrictMode(true)},
 		},
 		{
 			name:                      "malformed_structuredcontent_falls_back_to_text",
 			tool:                      "create_order_text",
 			injectMalformedStructured: true,
-			decodeOpts:                []bridge.Option{bridge.WithStrictMode(true)},
+			structDecodeOpts:          []bridge.Option{bridge.WithStrictMode(true)},
+			protoDecodeOpts:           []bridge.Option{bridge.WithStrictMode(true)},
+		},
+		{
+			name:            "tool_error_payload",
+			tool:            "create_order_tool_error",
+			expectIsError:   true,
+			expectStructErr: bridgeerrors.ErrToolReturnedError,
+			expectProtoErr:  bridgeerrors.ErrToolReturnedError,
+		},
+		{
+			name:             "proto_strict_unknown_field_failure",
+			tool:             "create_order_unknown_field",
+			structDecodeOpts: nil,
+			protoDecodeOpts:  []bridge.Option{bridge.WithStrictMode(true)},
+			expectProtoErr:   bridgeerrors.ErrFieldMappingFailed,
 		},
 	}
 
@@ -70,21 +94,35 @@ func TestRealPythonMCPResponseDecode(t *testing.T) {
 				t.Fatalf("unmarshal captured MCP response into types.CallToolResult: %v\npayload:\n%s", err, data)
 			}
 
-			if result.IsError {
-				t.Fatalf("expected isError=false in real MCP response")
+			if result.IsError != tc.expectIsError {
+				t.Fatalf("unexpected isError flag: got %v want %v", result.IsError, tc.expectIsError)
 			}
 
 			var structOut integrationOrderResponse
-			if err := bridge.Decode(&result, &structOut, tc.decodeOpts...); err != nil {
-				t.Fatalf("Decode from real MCP response failed: %v", err)
+			structErr := bridge.Decode(&result, &structOut, tc.structDecodeOpts...)
+			if tc.expectStructErr != nil {
+				if !errors.Is(structErr, tc.expectStructErr) {
+					t.Fatalf("expected struct decode error %v, got %v", tc.expectStructErr, structErr)
+				}
+			} else {
+				if structErr != nil {
+					t.Fatalf("Decode from real MCP response failed: %v", structErr)
+				}
+				assertOrder(t, structOut.OrderID, structOut.Status, structOut.Amount)
 			}
-			assertOrder(t, structOut.OrderID, structOut.Status, structOut.Amount)
 
 			var protoOut orderpb.CreateOrderResponse
-			if err := bridge.DecodeProto(&result, &protoOut, tc.decodeOpts...); err != nil {
-				t.Fatalf("DecodeProto from real MCP response failed: %v", err)
+			protoErr := bridge.DecodeProto(&result, &protoOut, tc.protoDecodeOpts...)
+			if tc.expectProtoErr != nil {
+				if !errors.Is(protoErr, tc.expectProtoErr) {
+					t.Fatalf("expected proto decode error %v, got %v", tc.expectProtoErr, protoErr)
+				}
+			} else {
+				if protoErr != nil {
+					t.Fatalf("DecodeProto from real MCP response failed: %v", protoErr)
+				}
+				assertOrder(t, protoOut.GetOrderId(), protoOut.GetStatus(), protoOut.GetAmount())
 			}
-			assertOrder(t, protoOut.GetOrderId(), protoOut.GetStatus(), protoOut.GetAmount())
 		})
 	}
 }

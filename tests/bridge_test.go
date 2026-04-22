@@ -4,14 +4,20 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/akshay/mcp-proto-bridge/generated/fraudpb"
 	"github.com/akshay/mcp-proto-bridge/generated/orderpb"
 	"github.com/akshay/mcp-proto-bridge/pkg/bridge"
 	bridgeerrors "github.com/akshay/mcp-proto-bridge/pkg/errors"
 	"github.com/akshay/mcp-proto-bridge/pkg/extractor"
+	"github.com/akshay/mcp-proto-bridge/pkg/observe"
+	"github.com/akshay/mcp-proto-bridge/pkg/replay"
+	"github.com/akshay/mcp-proto-bridge/pkg/runtimecounters"
 	"github.com/akshay/mcp-proto-bridge/pkg/types"
 )
 
@@ -836,4 +842,884 @@ func orderResult() *types.CallToolResult {
 			"amount":   50.0,
 		},
 	}
+}
+
+func TestStructuredDecodeErrorIncludesStageAndCategory(t *testing.T) {
+	result := &types.CallToolResult{
+		StructuredContent: map[string]any{
+			"order_id": "ORD-123",
+		},
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out)
+	if !errors.Is(err, bridgeerrors.ErrValidationFailed) {
+		t.Fatalf("expected ErrValidationFailed compatibility, got %v", err)
+	}
+
+	var decodeErr *bridgeerrors.DecodeError
+	if !errors.As(err, &decodeErr) {
+		t.Fatalf("expected structured DecodeError, got %T", err)
+	}
+	if decodeErr.Stage != bridgeerrors.StageValidate {
+		t.Fatalf("expected stage validate, got %s", decodeErr.Stage)
+	}
+	if decodeErr.Category != bridgeerrors.CategoryValidation {
+		t.Fatalf("expected category validation, got %s", decodeErr.Category)
+	}
+}
+
+func TestObservabilityHooksEmitLifecycleStages(t *testing.T) {
+	tracer := &testTracer{}
+	metrics := &testMetrics{}
+	logger := &testLogger{}
+
+	hooks := observe.Hooks{
+		Tracer:      tracer,
+		Metrics:     metrics,
+		EventLogger: logger,
+	}
+
+	var out createOrder
+	err := bridge.Decode(orderResult(), &out, bridge.WithHooks(hooks))
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+
+	if len(tracer.starts) != 5 {
+		t.Fatalf("expected 5 stage starts, got %d (%v)", len(tracer.starts), tracer.starts)
+	}
+	if len(tracer.finishes) != 5 {
+		t.Fatalf("expected 5 stage finishes, got %d (%v)", len(tracer.finishes), tracer.finishes)
+	}
+	if tracer.starts[0] != bridgeerrors.StageFinalDecode {
+		t.Fatalf("expected first stage to be final_decode, got %s", tracer.starts[0])
+	}
+	if tracer.finishes[len(tracer.finishes)-1] != bridgeerrors.StageFinalDecode {
+		t.Fatalf("expected last finished stage to be final_decode, got %s", tracer.finishes[len(tracer.finishes)-1])
+	}
+	if len(metrics.samples) != 5 {
+		t.Fatalf("expected 5 metric samples, got %d", len(metrics.samples))
+	}
+	if len(logger.events) != 10 {
+		t.Fatalf("expected 10 start/finish events, got %d", len(logger.events))
+	}
+}
+
+func TestSafetyLimitsRejectOversizedString(t *testing.T) {
+	result := &types.CallToolResult{
+		StructuredContent: map[string]any{
+			"order_id": "ORD-123",
+			"status":   "confirmed",
+			"amount":   50.0,
+			"notes":    "1234567890",
+		},
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out, bridge.WithSafetyLimits(bridge.SafetyLimits{MaxStringLength: 5}))
+	if !errors.Is(err, bridgeerrors.ErrPayloadSafetyViolation) {
+		t.Fatalf("expected ErrPayloadSafetyViolation, got %v", err)
+	}
+
+	var decodeErr *bridgeerrors.DecodeError
+	if !errors.As(err, &decodeErr) {
+		t.Fatalf("expected DecodeError, got %T", err)
+	}
+	if decodeErr.Stage != bridgeerrors.StageExtract {
+		t.Fatalf("expected extract stage for safety violation, got %s", decodeErr.Stage)
+	}
+	if decodeErr.Category != bridgeerrors.CategorySafety {
+		t.Fatalf("expected safety category, got %s", decodeErr.Category)
+	}
+}
+
+func TestProfileAppliesPresetBehavior(t *testing.T) {
+	prefer := false
+	indent := false
+	profile := bridge.Profile{
+		Name: "legacy-text-first",
+		FieldAliases: map[string]string{
+			"id":    "order_id",
+			"state": "status",
+		},
+		PreferStructuredContent: &prefer,
+		JSONIndentDetection:     &indent,
+	}
+
+	result := &types.CallToolResult{
+		StructuredContent: map[string]any{
+			"id":    "ORD-123",
+			"state": "confirmed",
+		},
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out, bridge.WithProfile(profile))
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	if out.OrderID != "ORD-123" || out.Status != "confirmed" {
+		t.Fatalf("profile aliases not applied: %+v", out)
+	}
+}
+
+func TestReplayArtifactCaptureAndReplay_Golden(t *testing.T) {
+	result := &types.CallToolResult{
+		StructuredContent: map[string]any{
+			"order_id": "ORD-123",
+		},
+	}
+
+	opts := []bridge.Option{
+		bridge.WithStrictMode(true),
+		bridge.WithTargetName("create_order"),
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out, opts...)
+	if err == nil {
+		t.Fatal("expected decode error")
+	}
+
+	artifact, captureErr := replay.CaptureDecodeFailure(result, opts, err)
+	if captureErr != nil {
+		t.Fatalf("CaptureDecodeFailure returned error: %v", captureErr)
+	}
+
+	goldenPath := filepath.Join("testdata", "replay", "decode_failure.golden.json")
+	golden, readErr := os.ReadFile(goldenPath)
+	if readErr != nil {
+		t.Fatalf("read golden fixture: %v", readErr)
+	}
+	if strings.TrimSpace(string(artifact)) != strings.TrimSpace(string(golden)) {
+		t.Fatalf("artifact mismatch\nexpected:\n%s\n\ngot:\n%s", golden, artifact)
+	}
+
+	var replayOut createOrder
+	replayErr := replay.ReplayDecode(artifact, &replayOut)
+	if !errors.Is(replayErr, bridgeerrors.ErrValidationFailed) {
+		t.Fatalf("expected replay to fail with validation error, got %v", replayErr)
+	}
+}
+
+func TestPolicyIgnoreToolErrorAllowsDecodeFromStructuredPayload(t *testing.T) {
+	result := &types.CallToolResult{
+		IsError: true,
+		Content: []types.ContentBlock{
+			types.TextContent{Type: "text", Text: "temporary tool flag"},
+		},
+		StructuredContent: map[string]any{
+			"order_id": "ORD-123",
+			"status":   "confirmed",
+			"amount":   50.0,
+		},
+	}
+
+	policy := bridge.DecodePolicy{
+		OnToolError:        bridge.ErrorPolicyIgnore,
+		OnNoPayload:        bridge.ErrorPolicyFail,
+		RequiredValidation: bridge.ValidationEnforce,
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out, bridge.WithDecodePolicy(policy))
+	if err != nil {
+		t.Fatalf("expected decode success with ignore-tool-error policy, got %v", err)
+	}
+	if out.OrderID != "ORD-123" || out.Status != "confirmed" {
+		t.Fatalf("unexpected decoded value: %+v", out)
+	}
+}
+
+func TestPolicyIgnoreNoPayloadWithSkipValidationReturnsZeroValue(t *testing.T) {
+	result := &types.CallToolResult{}
+	policy := bridge.DecodePolicy{
+		OnToolError:        bridge.ErrorPolicyFail,
+		OnNoPayload:        bridge.ErrorPolicyIgnore,
+		RequiredValidation: bridge.ValidationSkip,
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out, bridge.WithDecodePolicy(policy))
+	if err != nil {
+		t.Fatalf("expected decode success for ignored no-payload policy, got %v", err)
+	}
+	if out != (createOrder{}) {
+		t.Fatalf("expected zero-value decode output, got %+v", out)
+	}
+}
+
+func TestPolicyIgnoreNoPayloadStillFailsWhenValidationEnabled(t *testing.T) {
+	result := &types.CallToolResult{}
+	policy := bridge.DecodePolicy{
+		OnToolError:        bridge.ErrorPolicyFail,
+		OnNoPayload:        bridge.ErrorPolicyIgnore,
+		RequiredValidation: bridge.ValidationEnforce,
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out, bridge.WithDecodePolicy(policy))
+	if !errors.Is(err, bridgeerrors.ErrValidationFailed) {
+		t.Fatalf("expected ErrValidationFailed, got %v", err)
+	}
+}
+
+func TestReplayArtifactIncludesDecodePolicy(t *testing.T) {
+	result := &types.CallToolResult{}
+	policy := bridge.DecodePolicy{
+		OnToolError:        bridge.ErrorPolicyFail,
+		OnNoPayload:        bridge.ErrorPolicyIgnore,
+		RequiredValidation: bridge.ValidationSkip,
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out, bridge.WithDecodePolicy(policy))
+	if err != nil {
+		t.Fatalf("expected decode success with skip-validation policy, got %v", err)
+	}
+
+	artifact, captureErr := replay.CaptureDecodeFailure(result, []bridge.Option{bridge.WithDecodePolicy(policy)}, nil)
+	if captureErr != nil {
+		t.Fatalf("CaptureDecodeFailure returned error: %v", captureErr)
+	}
+
+	var parsed map[string]any
+	if unmarshalErr := json.Unmarshal(artifact, &parsed); unmarshalErr != nil {
+		t.Fatalf("unmarshal artifact: %v", unmarshalErr)
+	}
+	cfg, ok := parsed["config"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing config object in artifact: %s", artifact)
+	}
+	policyObj, ok := cfg["decode_policy"].(map[string]any)
+	if !ok {
+		t.Fatalf("missing decode_policy object in artifact config: %s", artifact)
+	}
+	if policyObj["OnNoPayload"] != string(bridge.ErrorPolicyIgnore) {
+		t.Fatalf("unexpected OnNoPayload value: %v", policyObj["OnNoPayload"])
+	}
+	if policyObj["RequiredValidation"] != string(bridge.ValidationSkip) {
+		t.Fatalf("unexpected RequiredValidation value: %v", policyObj["RequiredValidation"])
+	}
+}
+
+func TestVersionRulesApplyVersionSpecificProfile(t *testing.T) {
+	prefer := true
+	v2Profile := bridge.Profile{
+		Name: "v2-order",
+		FieldAliases: map[string]string{
+			"id":    "order_id",
+			"state": "status",
+		},
+		PreferStructuredContent: &prefer,
+	}
+
+	rules := bridge.VersionRules{
+		VersionMetaKey: "schema_version",
+		ProfilesByVersion: map[string]bridge.Profile{
+			"v2": v2Profile,
+		},
+	}
+
+	result := &types.CallToolResult{
+		Meta: map[string]any{
+			"schema_version": "v2",
+		},
+		StructuredContent: map[string]any{
+			"id":     "ORD-123",
+			"state":  "confirmed",
+			"amount": 50.0,
+		},
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out, bridge.WithVersionRules(rules))
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	if out.OrderID != "ORD-123" || out.Status != "confirmed" {
+		t.Fatalf("expected version profile aliases to apply, got %+v", out)
+	}
+}
+
+func TestVersionRulesNoMatchFallsBackToBaseConfig(t *testing.T) {
+	prefer := true
+	v2Profile := bridge.Profile{
+		Name: "v2-order",
+		FieldAliases: map[string]string{
+			"id":    "order_id",
+			"state": "status",
+		},
+		PreferStructuredContent: &prefer,
+	}
+
+	rules := bridge.VersionRules{
+		VersionMetaKey: "schema_version",
+		ProfilesByVersion: map[string]bridge.Profile{
+			"v2": v2Profile,
+		},
+	}
+
+	result := &types.CallToolResult{
+		Meta: map[string]any{
+			"schema_version": "v1",
+		},
+		StructuredContent: map[string]any{
+			"id":     "ORD-123",
+			"state":  "confirmed",
+			"amount": 50.0,
+		},
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out, bridge.WithVersionRules(rules))
+	if !errors.Is(err, bridgeerrors.ErrValidationFailed) {
+		t.Fatalf("expected base config behavior without alias rule match, got %v", err)
+	}
+}
+
+func TestProvenanceMetadataIncludedInEvents(t *testing.T) {
+	prefer := true
+	profile := bridge.Profile{
+		Name: "v2-profile",
+		FieldAliases: map[string]string{
+			"id":    "order_id",
+			"state": "status",
+		},
+		PreferStructuredContent: &prefer,
+	}
+	rules := bridge.VersionRules{
+		VersionMetaKey: "schema_version",
+		ProfilesByVersion: map[string]bridge.Profile{
+			"v2": profile,
+		},
+	}
+	logger := &testLogger{}
+
+	result := &types.CallToolResult{
+		Meta: map[string]any{"schema_version": "v2"},
+		StructuredContent: map[string]any{
+			"id":     "ORD-123",
+			"state":  "confirmed",
+			"amount": 50.0,
+		},
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out, bridge.WithVersionRules(rules), bridge.WithHooks(observe.Hooks{EventLogger: logger}))
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+
+	found := false
+	for _, evt := range logger.events {
+		if evt.Kind == "finish" && evt.Stage == bridgeerrors.StageMap {
+			if evt.Provenance.ResolvedVersion != "v2" {
+				t.Fatalf("expected resolved version v2, got %q", evt.Provenance.ResolvedVersion)
+			}
+			if !evt.Provenance.VersionRuleMatched {
+				t.Fatalf("expected VersionRuleMatched=true, got false")
+			}
+			if evt.Provenance.AppliedProfile != "v2-profile" {
+				t.Fatalf("expected applied profile v2-profile, got %q", evt.Provenance.AppliedProfile)
+			}
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("expected finish/map event with provenance metadata, got %d events", len(logger.events))
+	}
+}
+
+func TestDriftEventEmittedForUnknownVersion(t *testing.T) {
+	logger := &testLogger{}
+	rules := bridge.VersionRules{
+		VersionMetaKey: "schema_version",
+		ProfilesByVersion: map[string]bridge.Profile{
+			"v2": {Name: "v2-profile"},
+		},
+	}
+	driftRules := bridge.DriftRules{EmitUnknownVersion: true}
+
+	result := &types.CallToolResult{
+		Meta: map[string]any{"schema_version": "v999"},
+		StructuredContent: map[string]any{
+			"order_id": "ORD-123",
+			"status":   "confirmed",
+			"amount":   50.0,
+		},
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out,
+		bridge.WithVersionRules(rules),
+		bridge.WithDriftRules(driftRules),
+		bridge.WithHooks(observe.Hooks{EventLogger: logger}),
+	)
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+
+	for _, evt := range logger.events {
+		if evt.Kind == "drift" && evt.Drift != nil && evt.Drift.Type == "unknown_version" {
+			return
+		}
+	}
+	t.Fatalf("expected unknown_version drift event, got %d events", len(logger.events))
+}
+
+func TestDriftEventEmittedForIgnoredNoPayload(t *testing.T) {
+	logger := &testLogger{}
+	policy := bridge.DecodePolicy{
+		OnToolError:        bridge.ErrorPolicyFail,
+		OnNoPayload:        bridge.ErrorPolicyIgnore,
+		RequiredValidation: bridge.ValidationSkip,
+	}
+	driftRules := bridge.DriftRules{EmitIgnoredNoPayload: true}
+
+	var out createOrder
+	err := bridge.Decode(&types.CallToolResult{}, &out,
+		bridge.WithDecodePolicy(policy),
+		bridge.WithDriftRules(driftRules),
+		bridge.WithHooks(observe.Hooks{EventLogger: logger}),
+	)
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+
+	for _, evt := range logger.events {
+		if evt.Kind == "drift" && evt.Drift != nil && evt.Drift.Type == "ignored_no_payload" {
+			return
+		}
+	}
+	t.Fatalf("expected ignored_no_payload drift event, got %d events", len(logger.events))
+}
+
+func TestAdaptiveRoutingPrefersTextWhenNoStructured(t *testing.T) {
+	routing := bridge.AdaptiveRouting{
+		Enabled:                   true,
+		PreferTextWhenBothPresent: true,
+	}
+
+	result := &types.CallToolResult{
+		StructuredContent: map[string]any{
+			"order_id": "ORD-STRUCT",
+			"status":   "from_structured",
+			"amount":   10.0,
+		},
+		Content: []types.ContentBlock{
+			types.TextContent{Type: "text", Text: `{"order_id":"ORD-TEXT","status":"from_text","amount":20}`},
+		},
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out,
+		bridge.WithPreferStructuredContent(true),
+		bridge.WithAdaptiveRouting(routing),
+	)
+	if err != nil {
+		t.Fatalf("Decode returned error: %v", err)
+	}
+	if out.OrderID != "ORD-TEXT" || out.Status != "from_text" || out.Amount != 20 {
+		t.Fatalf("unexpected decoded value: %+v", out)
+	}
+}
+
+func TestAutoRepairQuotedJSONStringPayload(t *testing.T) {
+	quoted := `{"order_id":"ORD-123","status":"confirmed","amount":50}`
+	result := &types.CallToolResult{
+		StructuredContent: map[string]any{"placeholder": true},
+	}
+
+	stringPayloadExtractor := extractor.ExtractorFunc(func(*types.CallToolResult) (any, error) {
+		return quoted, nil
+	})
+
+	var withoutRepair createOrder
+	err := bridge.Decode(result, &withoutRepair, bridge.WithCustomExtractor(stringPayloadExtractor))
+	if !errors.Is(err, bridgeerrors.ErrFieldMappingFailed) {
+		t.Fatalf("expected ErrFieldMappingFailed without auto-repair, got %v", err)
+	}
+
+	logger := &testLogger{}
+	repair := bridge.AutoRepair{Enabled: true, MaxRepairPasses: 1}
+	var out createOrder
+	err = bridge.Decode(result, &out,
+		bridge.WithCustomExtractor(stringPayloadExtractor),
+		bridge.WithAutoRepair(repair),
+		bridge.WithHooks(observe.Hooks{EventLogger: logger}),
+	)
+	if err != nil {
+		t.Fatalf("expected auto-repair success, got %v", err)
+	}
+	if out.OrderID != "ORD-123" || out.Status != "confirmed" || out.Amount != 50 {
+		t.Fatalf("unexpected decoded value after repair: %+v", out)
+	}
+
+	for _, evt := range logger.events {
+		if evt.Kind == "finish" && evt.Stage == bridgeerrors.StageNormalize {
+			if evt.Provenance.AutoRepairPasses < 1 {
+				t.Fatalf("expected auto-repair passes >= 1, got %d", evt.Provenance.AutoRepairPasses)
+			}
+			return
+		}
+	}
+	t.Fatalf("missing normalize finish event for repair provenance")
+}
+
+func TestAutoRepairSingleEnvelopePayload(t *testing.T) {
+	result := &types.CallToolResult{
+		StructuredContent: map[string]any{
+			"payload": map[string]any{
+				"order_id": "ORD-123",
+				"status":   "confirmed",
+				"amount":   50.0,
+			},
+		},
+	}
+
+	var withoutRepair createOrder
+	err := bridge.Decode(result, &withoutRepair)
+	if !errors.Is(err, bridgeerrors.ErrValidationFailed) {
+		t.Fatalf("expected validation failure without repair, got %v", err)
+	}
+
+	var out createOrder
+	err = bridge.Decode(result, &out, bridge.WithAutoRepair(bridge.AutoRepair{Enabled: true, MaxRepairPasses: 2}))
+	if err != nil {
+		t.Fatalf("expected envelope repair success, got %v", err)
+	}
+	if out.OrderID != "ORD-123" || out.Status != "confirmed" {
+		t.Fatalf("unexpected decoded value after envelope repair: %+v", out)
+	}
+}
+
+func TestRuntimeCountersTrackDecodeSuccessAndFailure(t *testing.T) {
+	counters := runtimecounters.New()
+
+	var out createOrder
+	if err := bridge.Decode(orderResult(), &out, bridge.WithRuntimeCounters(counters)); err != nil {
+		t.Fatalf("expected successful decode, got %v", err)
+	}
+
+	err := bridge.Decode(&types.CallToolResult{}, &out, bridge.WithRuntimeCounters(counters))
+	if !errors.Is(err, bridgeerrors.ErrNoStructuredPayload) {
+		t.Fatalf("expected ErrNoStructuredPayload, got %v", err)
+	}
+
+	snap := counters.Snapshot()
+	if snap.Counters["decode.calls"] != 2 {
+		t.Fatalf("expected decode.calls=2, got %d", snap.Counters["decode.calls"])
+	}
+	if snap.Counters["decode.success"] != 1 {
+		t.Fatalf("expected decode.success=1, got %d", snap.Counters["decode.success"])
+	}
+	if snap.Counters["decode.failure"] != 1 {
+		t.Fatalf("expected decode.failure=1, got %d", snap.Counters["decode.failure"])
+	}
+}
+
+func TestRuntimeCountersTrackAdaptiveRepairAndDrift(t *testing.T) {
+	counters := runtimecounters.New()
+	quoted := `{"order_id":"ORD-123","status":"confirmed","amount":50}`
+	stringPayloadExtractor := extractor.ExtractorFunc(func(*types.CallToolResult) (any, error) {
+		return quoted, nil
+	})
+
+	var out createOrder
+	err := bridge.Decode(&types.CallToolResult{StructuredContent: map[string]any{"placeholder": true}}, &out,
+		bridge.WithCustomExtractor(stringPayloadExtractor),
+		bridge.WithAutoRepair(bridge.AutoRepair{Enabled: true, MaxRepairPasses: 1}),
+		bridge.WithRuntimeCounters(counters),
+	)
+	if err != nil {
+		t.Fatalf("expected repaired decode success, got %v", err)
+	}
+
+	vRules := bridge.VersionRules{VersionMetaKey: "schema_version", ProfilesByVersion: map[string]bridge.Profile{"v2": {Name: "v2"}}}
+	err = bridge.Decode(&types.CallToolResult{
+		Meta: map[string]any{"schema_version": "unknown"},
+		StructuredContent: map[string]any{
+			"order_id": "ORD-123",
+			"status":   "confirmed",
+			"amount":   50.0,
+		},
+	}, &out,
+		bridge.WithVersionRules(vRules),
+		bridge.WithDriftRules(bridge.DriftRules{EmitUnknownVersion: true}),
+		bridge.WithRuntimeCounters(counters),
+	)
+	if err != nil {
+		t.Fatalf("expected decode success with unknown version drift, got %v", err)
+	}
+
+	snap := counters.Snapshot()
+	if snap.Counters["decode.auto_repair.applied"] < 1 {
+		t.Fatalf("expected decode.auto_repair.applied >= 1, got %d", snap.Counters["decode.auto_repair.applied"])
+	}
+	if snap.Counters["decode.auto_repair.passes"] < 1 {
+		t.Fatalf("expected decode.auto_repair.passes >= 1, got %d", snap.Counters["decode.auto_repair.passes"])
+	}
+	if snap.Counters["drift.unknown_version"] < 1 {
+		t.Fatalf("expected drift.unknown_version >= 1, got %d", snap.Counters["drift.unknown_version"])
+	}
+}
+
+func TestValidationDeepNestedMapSlicePath(t *testing.T) {
+	type tag struct {
+		Code string `json:"code" bridge:"required"`
+	}
+	type item struct {
+		Tags []tag `json:"tags"`
+	}
+	type response struct {
+		Groups map[string][]item `json:"groups"`
+	}
+
+	result := &types.CallToolResult{
+		StructuredContent: map[string]any{
+			"groups": map[string]any{
+				"west": []any{
+					map[string]any{
+						"tags": []any{map[string]any{}},
+					},
+				},
+			},
+		},
+	}
+
+	var out response
+	err := bridge.Decode(result, &out)
+	if !errors.Is(err, bridgeerrors.ErrValidationFailed) {
+		t.Fatalf("expected ErrValidationFailed, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "groups[west][0].tags[0].code") {
+		t.Fatalf("expected nested path groups[west][0].tags[0].code, got %v", err)
+	}
+}
+
+func TestValidationNestedPointerMapPath(t *testing.T) {
+	type address struct {
+		Zip string `json:"zip" bridge:"required"`
+	}
+	type profile struct {
+		Addresses map[string]*address `json:"addresses"`
+	}
+
+	result := &types.CallToolResult{
+		StructuredContent: map[string]any{
+			"addresses": map[string]any{
+				"home": map[string]any{},
+			},
+		},
+	}
+
+	var out profile
+	err := bridge.Decode(result, &out)
+	if !errors.Is(err, bridgeerrors.ErrValidationFailed) {
+		t.Fatalf("expected ErrValidationFailed, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "addresses[home].zip") {
+		t.Fatalf("expected nested path addresses[home].zip, got %v", err)
+	}
+}
+
+func TestValidationDeeplyNestedCollectionsMultipleBranches(t *testing.T) {
+	type leaf struct {
+		Value string `json:"value" bridge:"required"`
+	}
+	type branch struct {
+		Leaves [][]leaf `json:"leaves"`
+	}
+	type tree struct {
+		Branches []branch `json:"branches"`
+	}
+
+	result := &types.CallToolResult{
+		StructuredContent: map[string]any{
+			"branches": []any{
+				map[string]any{
+					"leaves": []any{
+						[]any{map[string]any{}},
+					},
+				},
+			},
+		},
+	}
+
+	var out tree
+	err := bridge.Decode(result, &out)
+	if !errors.Is(err, bridgeerrors.ErrValidationFailed) {
+		t.Fatalf("expected ErrValidationFailed, got %v", err)
+	}
+	if !strings.Contains(err.Error(), "branches[0].leaves[0][0].value") {
+		t.Fatalf("expected nested path branches[0].leaves[0][0].value, got %v", err)
+	}
+}
+
+func TestSafetyLimitRejectsPayloadBytesBoundary(t *testing.T) {
+	result := &types.CallToolResult{
+		StructuredContent: map[string]any{
+			"order_id": "ORD-123",
+			"status":   "confirmed",
+			"amount":   50.0,
+			"notes":    strings.Repeat("x", 256),
+		},
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out, bridge.WithSafetyLimits(bridge.SafetyLimits{MaxPayloadBytes: 64}))
+	if !errors.Is(err, bridgeerrors.ErrPayloadSafetyViolation) {
+		t.Fatalf("expected ErrPayloadSafetyViolation, got %v", err)
+	}
+
+	var decodeErr *bridgeerrors.DecodeError
+	if !errors.As(err, &decodeErr) {
+		t.Fatalf("expected DecodeError, got %T", err)
+	}
+	if decodeErr.Stage != bridgeerrors.StageExtract || decodeErr.Category != bridgeerrors.CategorySafety {
+		t.Fatalf("expected extract/safety classification, got stage=%s category=%s", decodeErr.Stage, decodeErr.Category)
+	}
+}
+
+func TestSafetyLimitRejectsNestingDepthBoundary(t *testing.T) {
+	nested := map[string]any{"lvl1": map[string]any{"lvl2": map[string]any{"lvl3": "too_deep"}}}
+	result := &types.CallToolResult{StructuredContent: nested}
+
+	var out map[string]any
+	err := bridge.Decode(result, &out, bridge.WithSafetyLimits(bridge.SafetyLimits{MaxNestingDepth: 2}))
+	if !errors.Is(err, bridgeerrors.ErrPayloadSafetyViolation) {
+		t.Fatalf("expected ErrPayloadSafetyViolation, got %v", err)
+	}
+}
+
+func TestSafetyLimitRejectsCollectionAndNodeBoundaries(t *testing.T) {
+	result := &types.CallToolResult{
+		StructuredContent: map[string]any{
+			"order_id": "ORD-123",
+			"status":   "confirmed",
+			"amount":   50.0,
+			"items":    []any{1, 2, 3},
+		},
+	}
+
+	var out createOrder
+	err := bridge.Decode(result, &out, bridge.WithSafetyLimits(bridge.SafetyLimits{MaxCollectionLength: 2}))
+	if !errors.Is(err, bridgeerrors.ErrPayloadSafetyViolation) {
+		t.Fatalf("expected collection length safety violation, got %v", err)
+	}
+
+	err = bridge.Decode(result, &out, bridge.WithSafetyLimits(bridge.SafetyLimits{MaxNodeCount: 3}))
+	if !errors.Is(err, bridgeerrors.ErrPayloadSafetyViolation) {
+		t.Fatalf("expected node count safety violation, got %v", err)
+	}
+}
+
+func TestDecodeErrorClassificationDeterministic(t *testing.T) {
+	tests := []struct {
+		name        string
+		result      *types.CallToolResult
+		opts        []bridge.Option
+		expectErr   error
+		expectStage bridgeerrors.Stage
+		expectCat   bridgeerrors.Category
+	}{
+		{
+			name:        "no_payload",
+			result:      &types.CallToolResult{},
+			expectErr:   bridgeerrors.ErrNoStructuredPayload,
+			expectStage: bridgeerrors.StageExtract,
+			expectCat:   bridgeerrors.CategoryNoPayload,
+		},
+		{
+			name: "tool_error",
+			result: &types.CallToolResult{
+				IsError: true,
+				Content: []types.ContentBlock{types.TextContent{Type: "text", Text: "upstream denied"}},
+			},
+			expectErr:   bridgeerrors.ErrToolReturnedError,
+			expectStage: bridgeerrors.StageExtract,
+			expectCat:   bridgeerrors.CategoryToolError,
+		},
+		{
+			name: "invalid_json",
+			result: &types.CallToolResult{
+				Content: []types.ContentBlock{types.TextContent{Type: "text", Text: `{"order_id":`}},
+			},
+			expectErr:   bridgeerrors.ErrInvalidJSONTextContent,
+			expectStage: bridgeerrors.StageExtract,
+			expectCat:   bridgeerrors.CategoryInvalidJSON,
+		},
+		{
+			name: "mapping_failure",
+			result: &types.CallToolResult{
+				StructuredContent: map[string]any{
+					"order_id": "ORD-123",
+					"status":   "confirmed",
+					"amount":   50.0,
+					"extra":    true,
+				},
+			},
+			opts:        []bridge.Option{bridge.WithStrictMode(true)},
+			expectErr:   bridgeerrors.ErrFieldMappingFailed,
+			expectStage: bridgeerrors.StageMap,
+			expectCat:   bridgeerrors.CategoryMapping,
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			var out createOrder
+			err := bridge.Decode(tc.result, &out, tc.opts...)
+			if !errors.Is(err, tc.expectErr) {
+				t.Fatalf("expected errors.Is(%v), got %v", tc.expectErr, err)
+			}
+			var decodeErr *bridgeerrors.DecodeError
+			if !errors.As(err, &decodeErr) {
+				t.Fatalf("expected DecodeError, got %T", err)
+			}
+			if decodeErr.Stage != tc.expectStage {
+				t.Fatalf("expected stage %s, got %s", tc.expectStage, decodeErr.Stage)
+			}
+			if decodeErr.Category != tc.expectCat {
+				t.Fatalf("expected category %s, got %s", tc.expectCat, decodeErr.Category)
+			}
+		})
+	}
+}
+
+type testTracer struct {
+	starts   []bridgeerrors.Stage
+	finishes []bridgeerrors.Stage
+}
+
+func (t *testTracer) StartStage(stage bridgeerrors.Stage) func(err error) {
+	t.starts = append(t.starts, stage)
+	return func(err error) {
+		t.finishes = append(t.finishes, stage)
+	}
+}
+
+type metricSample struct {
+	stage   bridgeerrors.Stage
+	dur     time.Duration
+	success bool
+}
+
+type testMetrics struct {
+	samples []metricSample
+}
+
+func (m *testMetrics) ObserveStage(stage bridgeerrors.Stage, duration time.Duration, success bool) {
+	m.samples = append(m.samples, metricSample{stage: stage, dur: duration, success: success})
+}
+
+type testLogger struct {
+	events []observe.Event
+}
+
+func (l *testLogger) LogEvent(evt observe.Event) {
+	l.events = append(l.events, evt)
 }

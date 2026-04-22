@@ -176,6 +176,20 @@ Options:
 - `WithCustomExtractor(extractor.Extractor)`
 - `WithJSONIndentDetection(bool)`
 - `WithTargetName(string)`
+- `WithHooks(observe.Hooks)`
+- `WithSafetyLimits(bridge.SafetyLimits)`
+- `WithProfile(bridge.Profile)`
+- `WithDecodePolicy(bridge.DecodePolicy)`
+- `WithVersionRules(bridge.VersionRules)`
+- `WithDriftRules(bridge.DriftRules)`
+- `WithAdaptiveRouting(bridge.AdaptiveRouting)`
+- `WithAutoRepair(bridge.AutoRepair)`
+- `WithRuntimeCounters(bridge.RuntimeCounters)`
+
+Detailed behavior contracts are documented in:
+
+- [`docs/api_behavior_matrix.md`](docs/api_behavior_matrix.md)
+- [`docs/operational_readiness.md`](docs/operational_readiness.md)
 
 Output argument contract:
 
@@ -205,6 +219,8 @@ Use `errors.Is` to check error categories.
 - [`examples/basic_struct_decode`](examples/basic_struct_decode)
 - [`examples/protobuf_decode`](examples/protobuf_decode)
 - [`examples/grpc_handler_usage`](examples/grpc_handler_usage)
+- [`examples/practical_microservice_flow`](examples/practical_microservice_flow)
+- [`examples/operational_readiness`](examples/operational_readiness)
 - [`cmd/demo`](cmd/demo)
 
 ## Protobufs
