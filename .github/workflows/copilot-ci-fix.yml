@@ -5,29 +5,31 @@ env:
 
 on:
   workflow_run:
-    workflows: ["ci"]
+    workflows: ["ci"] # must match the CI workflow "name:", not filename
     types: [completed]
 
 permissions:
   issues: write
   contents: read
   actions: read
+  pull-requests: write
 
 jobs:
   create-or-update-copilot-issue:
     if: ${{ github.event.workflow_run.conclusion == 'failure' }}
     runs-on: ubuntu-latest
+
     steps:
       - name: Create or update Copilot CI fix issue
         uses: actions/github-script@v8
         env:
           COPILOT_ASSIGNEE: ${{ vars.COPILOT_ASSIGNEE }}
         with:
+          github-token: ${{ github.token }}
           script: |
             const wr = context.payload.workflow_run ?? {};
             const owner = context.repo.owner;
             const repo = context.repo.repo;
-            const apiHeaders = { "X-GitHub-Api-Version": "2022-11-28" };
 
             const conclusion = wr.conclusion ?? "";
             if (conclusion !== "failure") {
@@ -35,12 +37,18 @@ jobs:
               return;
             }
 
-            const branch = wr.head_branch ?? wr.pull_requests?.[0]?.head?.ref ?? "unknown-branch";
-            const sha = wr.head_sha ?? context.sha ?? "unknown-sha";
-            const shortSha = sha.length >= 7 ? sha.slice(0, 7) : sha;
             const workflowName = wr.name ?? "unknown-workflow";
+            const branch =
+              wr.head_branch ??
+              wr.pull_requests?.[0]?.head?.ref ??
+              "unknown-branch";
+
+            const sha = wr.head_sha ?? "unknown-sha";
+            const shortSha = sha.length >= 7 ? sha.slice(0, 7) : sha;
             const runId = wr.id ? String(wr.id) : "unknown-run";
-            const runUrl = wr.html_url ?? `${context.serverUrl}/${owner}/${repo}/actions/runs/${runId}`;
+            const runUrl =
+              wr.html_url ??
+              `${context.serverUrl}/${owner}/${repo}/actions/runs/${runId}`;
 
             const title = `Copilot: Fix CI failure for ${branch} (${shortSha})`;
             const dedupeKey = `ci-fix-key:${branch}:${sha}`;
@@ -61,30 +69,33 @@ jobs:
               "",
               "Required actions:",
               "1. Inspect the failing GitHub Actions logs for this run.",
-              "2. Identify the root cause of lint/test failure.",
-              "3. Fix ONLY lint/test issues with the smallest safe code change.",
-              "4. Avoid unrelated refactors or style-only churn.",
-              "5. Avoid changing business logic unless required to pass failing checks.",
-              "6. Update tests ONLY when tests are incorrect, not to mask defects.",
-              "7. Open a pull request containing the fix.",
-              "8. In the PR description, explain root cause, fix rationale, and validation steps.",
+              "2. Identify the root cause of the failure.",
+              "3. Only fix repository-owned lint or test failures.",
+              "4. Ignore unrelated failures such as permissions, missing secrets, GitHub outage/noise, runner issues, or flaky external infrastructure unless the repository itself clearly needs a deterministic fix.",
+              "5. Make the smallest safe code/configuration change possible.",
+              "6. Avoid unrelated refactors or style-only churn.",
+              "7. Avoid changing business logic unless required to resolve the failing checks.",
+              "8. Update tests only when tests are incorrect, not to hide real defects.",
+              "9. Open a pull request containing the fix.",
+              "10. In the PR description, explain root cause, fix rationale, and validation steps.",
               "",
-              "Retry hint: if CI is flaky or environment-dependent, prefer deterministic test/lint stabilization and document assumptions in the PR.",
+              "Retry hint: if CI is flaky or environment-dependent, prefer deterministic lint/test stabilization and document assumptions in the PR.",
             ].join("\n");
 
-            const issues = await github.paginate(github.rest.issues.listForRepo, {
-              owner,
-              repo,
-              state: "open",
-              labels: "copilot,ci-fix",
-              per_page: 100,
-              headers: apiHeaders,
-            });
+            // Find existing open issue for same branch/SHA marker
+            const issues = await github.paginate(
+              github.rest.issues.listForRepo,
+              {
+                owner,
+                repo,
+                state: "open",
+                labels: "copilot,ci-fix",
+                per_page: 100,
+              }
+            );
 
             const existing = issues.find((issue) => {
-              if (issue.pull_request) {
-                return false;
-              }
+              if (issue.pull_request) return false;
               const body = issue.body ?? "";
               return issue.title === title || body.includes(marker);
             });
@@ -98,7 +109,7 @@ jobs:
                 `- Workflow: ${workflowName}`,
                 `- Failed Run: ${runUrl}`,
                 "",
-                "@copilot please re-check this failure and continue the fix PR with minimal, production-safe changes.",
+                "@copilot please re-check this failed CI run, focus on repository-owned lint/test failures only, and continue with a minimal, production-safe fix PR.",
               ].join("\n");
 
               await github.rest.issues.createComment({
@@ -106,43 +117,46 @@ jobs:
                 repo,
                 issue_number: existing.number,
                 body: comment,
-                headers: apiHeaders,
               });
 
               core.info(`Updated existing issue #${existing.number}.`);
               return;
             }
 
+            // Create new issue
             const created = await github.rest.issues.create({
               owner,
               repo,
               title,
               body: issueBody,
               labels: ["copilot", "ci-fix"],
-              headers: apiHeaders,
             });
 
+            const issueNumber = created.data.number;
+
+            // Try assignment in this order:
+            // 1. repo variable COPILOT_ASSIGNEE
+            // 2. "copilot"
+            // 3. "github-copilot[bot]"
             const candidateAssignees = [];
             const configuredAssignee = (process.env.COPILOT_ASSIGNEE || "").trim();
-            if (configuredAssignee) {
-              candidateAssignees.push(configuredAssignee);
-            }
+
+            if (configuredAssignee) candidateAssignees.push(configuredAssignee);
             candidateAssignees.push("copilot", "github-copilot[bot]");
 
             let assigned = false;
+
             for (const assignee of candidateAssignees) {
-              if (!assignee) {
-                continue;
-              }
+              if (!assignee) continue;
+
               try {
                 await github.rest.issues.addAssignees({
                   owner,
                   repo,
-                  issue_number: created.data.number,
+                  issue_number: issueNumber,
                   assignees: [assignee],
-                  headers: apiHeaders,
                 });
-                core.info(`Assigned issue #${created.data.number} to '${assignee}'.`);
+                core.info(`Assigned issue #${issueNumber} to '${assignee}'.`);
                 assigned = true;
                 break;
               } catch (err) {
@@ -150,22 +164,21 @@ jobs:
               }
             }
 
+            // Add explicit Copilot ping comment
             await github.rest.issues.createComment({
               owner,
               repo,
-              issue_number: created.data.number,
-              body: "@copilot please investigate this failed CI run, apply the minimal lint/test fix, and open a PR with root cause + validation details.",
-              headers: apiHeaders,
+              issue_number: issueNumber,
+              body: "@copilot please investigate this failed CI run, fix the repository-owned lint/test failure with the minimal safe change, and open a PR with root cause and validation details.",
             });
 
             if (!assigned) {
               await github.rest.issues.createComment({
                 owner,
                 repo,
-                issue_number: created.data.number,
-                body: "Assignment note: no valid Copilot assignee was found. Configure repository variable COPILOT_ASSIGNEE with a valid account if required by your org policy.",
-                headers: apiHeaders,
+                issue_number: issueNumber,
+                body: "Assignment note: no valid Copilot assignee was found. Set repository variable `COPILOT_ASSIGNEE` to the correct Copilot-enabled assignee for your org if required.",
               });
             }
 
-            core.info(`Created issue #${created.data.number}.`);
+            core.info(`Created issue #${issueNumber}.`);
