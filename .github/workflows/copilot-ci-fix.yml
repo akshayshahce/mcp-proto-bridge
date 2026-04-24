@@ -1,316 +1,75 @@
-name: copilot-ci-fix
-
-env:
-  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: "true"
+name: copilot-pr-auto-assign
 
 on:
-  workflow_run:
-    workflows: ["ci"] # must match the CI workflow "name:", not filename
-    types: [completed]
+  pull_request:
+    types: [opened, reopened, ready_for_review]
 
 permissions:
-  issues: write
-  contents: read
-  actions: read
   pull-requests: write
+  contents: read
 
 jobs:
-  create-or-update-copilot-issue:
-    if: ${{ github.event.workflow_run.conclusion == 'failure' }}
+  assign-copilot:
     runs-on: ubuntu-latest
-
     steps:
-      - name: Create or update Copilot CI fix issue and assign to agent
-        uses: actions/github-script@v9
+      - name: Assign PR to Copilot
+        uses: actions/github-script@v8
         env:
-          COPILOT_TRIGGER_TOKEN: ${{ secrets.COPILOT_TRIGGER_TOKEN }}
-          COPILOT_CUSTOM_AGENT: ${{ vars.COPILOT_CUSTOM_AGENT }}
-          COPILOT_MODEL: ${{ vars.COPILOT_MODEL }}
+          COPILOT_ASSIGNEE: ${{ vars.COPILOT_ASSIGNEE }}
         with:
           github-token: ${{ secrets.COPILOT_TRIGGER_TOKEN || github.token }}
           script: |
-            const wr = context.payload.workflow_run ?? {};
+            const pr = context.payload.pull_request;
+            if (!pr) {
+              core.info("No pull_request payload found. Nothing to do.");
+              return;
+            }
+
+            if (pr.draft) {
+              core.info(`PR #${pr.number} is draft. Assignment will run when it is marked ready_for_review.`);
+              return;
+            }
+
             const owner = context.repo.owner;
             const repo = context.repo.repo;
+            const issueNumber = pr.number;
 
-            const conclusion = wr.conclusion ?? "";
-            if (conclusion !== "failure") {
-              core.info(`Skipping because conclusion is '${conclusion || "unknown"}'.`);
-              return;
+            const currentAssignees = new Set((pr.assignees || []).map((a) => a.login));
+
+            const candidates = [];
+            const configuredAssignee = (process.env.COPILOT_ASSIGNEE || "").trim();
+            if (configuredAssignee) {
+              candidates.push(configuredAssignee);
             }
+            candidates.push("copilot", "copilot-swe-agent", "github-copilot[bot]");
 
-            const workflowName = wr.name ?? "unknown-workflow";
-            const branch =
-              wr.head_branch ??
-              wr.pull_requests?.[0]?.head?.ref ??
-              "unknown-branch";
-
-            const sha = wr.head_sha ?? "unknown-sha";
-            const shortSha = sha.length >= 7 ? sha.slice(0, 7) : sha;
-            const runId = wr.id ? String(wr.id) : "unknown-run";
-            const runUrl =
-              wr.html_url ??
-              `${context.serverUrl}/${owner}/${repo}/actions/runs/${runId}`;
-
-            const title = `Copilot: Fix CI failure for ${branch} (${shortSha})`;
-            const dedupeKey = `ci-fix-key:${branch}:${sha}`;
-            const marker = `<!-- ${dedupeKey} -->`;
-
-            const customInstructions = [
-              "Investigate the failed CI run linked in the issue.",
-              "Only fix repository-owned lint or test failures.",
-              "Ignore unrelated failures such as permissions, missing secrets, GitHub outage/noise, runner issues, or flaky external infrastructure unless the repository itself clearly needs a deterministic fix.",
-              "Make the smallest safe code/configuration change possible.",
-              "Avoid unrelated refactors or style-only churn.",
-              "Avoid changing business logic unless required to resolve the failing checks.",
-              "Update tests only when tests are incorrect, not to hide real defects.",
-              "Open a pull request containing the fix.",
-              "In the PR description, explain root cause, fix rationale, and validation steps."
-            ].join(" ");
-
-            const issueBody = [
-              marker,
-              "## CI Failure Detected",
-              "",
-              `- Branch: ${branch}`,
-              `- Commit SHA: ${sha}`,
-              `- Workflow: ${workflowName}`,
-              `- Failed Run: ${runUrl}`,
-              "",
-              "## Copilot Task",
-              "",
-              "Please perform a minimal, production-safe CI fix for this repository.",
-              "",
-              "Required actions:",
-              "1. Inspect the failing GitHub Actions logs for this run.",
-              "2. Identify the root cause of the failure.",
-              "3. Only fix repository-owned lint or test failures.",
-              "4. Ignore unrelated failures such as permissions, missing secrets, GitHub outage/noise, runner issues, or flaky external infrastructure unless the repository itself clearly needs a deterministic fix.",
-              "5. Make the smallest safe code/configuration change possible.",
-              "6. Avoid unrelated refactors or style-only churn.",
-              "7. Avoid changing business logic unless required to resolve the failing checks.",
-              "8. Update tests only when tests are incorrect, not to hide real defects.",
-              "9. Open a pull request containing the fix.",
-              "10. In the PR description, explain root cause, fix rationale, and validation steps.",
-              "",
-              "Retry hint: if CI is flaky or environment-dependent, prefer deterministic lint/test stabilization and document assumptions in the PR."
-            ].join("\n");
-
-            const graphqlHeaders = {
-              "GraphQL-Features": "issues_copilot_assignment_api_support,coding_agent_model_selection"
-            };
-
-            async function gql(query, variables = {}) {
-              return await github.graphql(query, variables, {
-                headers: graphqlHeaders
-              });
-            }
-
-            // 1) Find Copilot agent actor ID via suggestedActors
-            const actorQuery = `
-              query($owner: String!, $name: String!) {
-                repository(owner: $owner, name: $name) {
-                  id
-                  suggestedActors(capabilities: [CAN_BE_ASSIGNED], first: 100) {
-                    nodes {
-                      __typename
-                      login
-                      ... on Bot { id }
-                      ... on User { id }
-                    }
-                  }
-                }
+            let assigned = false;
+            for (const assignee of candidates) {
+              if (!assignee) {
+                continue;
               }
-            `;
-
-            const actorResp = await gql(actorQuery, { owner, name: repo });
-            const repositoryNode = actorResp.repository;
-
-            if (!repositoryNode?.id) {
-              core.setFailed("Could not fetch repository GraphQL ID.");
-              return;
+              if (currentAssignees.has(assignee)) {
+                core.info(`PR #${issueNumber} is already assigned to '${assignee}'.`);
+                assigned = true;
+                break;
+              }
+              try {
+                await github.rest.issues.addAssignees({
+                  owner,
+                  repo,
+                  issue_number: issueNumber,
+                  assignees: [assignee],
+                });
+                core.info(`Assigned PR #${issueNumber} to '${assignee}'.`);
+                assigned = true;
+                break;
+              } catch (err) {
+                core.warning(`Could not assign '${assignee}': ${err.message}`);
+              }
             }
 
-            const repositoryId = repositoryNode.id;
-            const copilotActor = (repositoryNode.suggestedActors?.nodes || []).find(
-              (node) => node?.login === "copilot-swe-agent"
-            );
-
-            if (!copilotActor?.id) {
-              core.setFailed(
-                "Copilot cloud agent is not available in suggestedActors for this repository. " +
-                "Make sure Copilot cloud agent is enabled for the repo/org and that this PAT belongs to a user allowed to use it."
+            if (!assigned) {
+              core.warning(
+                "No Copilot assignee could be applied. Configure repository variable COPILOT_ASSIGNEE or ensure Copilot assignment is enabled for this repository."
               );
-              return;
             }
-
-            const copilotActorId = copilotActor.id;
-
-            // 2) Look for an existing open deduped issue
-            const issues = await github.paginate(
-              github.rest.issues.listForRepo,
-              {
-                owner,
-                repo,
-                state: "open",
-                labels: "copilot,ci-fix",
-                per_page: 100,
-              }
-            );
-
-            const existing = issues.find((issue) => {
-              if (issue.pull_request) return false;
-              const body = issue.body ?? "";
-              return issue.title === title || body.includes(marker);
-            });
-
-            const customAgent = (process.env.COPILOT_CUSTOM_AGENT || "").trim();
-            const model = (process.env.COPILOT_MODEL || "").trim();
-
-            const agentAssignment = {
-              targetRepositoryId: repositoryId,
-              baseRef: branch,
-              customInstructions
-            };
-
-            if (customAgent) {
-              agentAssignment.customAgent = customAgent;
-            }
-
-            if (model) {
-              agentAssignment.model = model;
-            }
-
-            if (existing) {
-              // 3A) Assign existing issue to Copilot agent using GraphQL
-              const issueIdQuery = `
-                query($owner: String!, $name: String!, $number: Int!) {
-                  repository(owner: $owner, name: $name) {
-                    issue(number: $number) {
-                      id
-                      number
-                      title
-                    }
-                  }
-                }
-              `;
-
-              const issueIdResp = await gql(issueIdQuery, {
-                owner,
-                name: repo,
-                number: existing.number
-              });
-
-              const existingIssueId = issueIdResp?.repository?.issue?.id;
-              if (!existingIssueId) {
-                core.setFailed(`Could not fetch GraphQL ID for existing issue #${existing.number}.`);
-                return;
-              }
-
-              const replaceActorsMutation = `
-                mutation(
-                  $assignableId: ID!,
-                  $actorIds: [ID!]!,
-                  $agentAssignment: AgentAssignmentInput
-                ) {
-                  replaceActorsForAssignable(input: {
-                    assignableId: $assignableId,
-                    actorIds: $actorIds,
-                    agentAssignment: $agentAssignment
-                  }) {
-                    assignable {
-                      ... on Issue {
-                        id
-                        number
-                        title
-                        assignees(first: 10) {
-                          nodes {
-                            login
-                          }
-                        }
-                      }
-                    }
-                  }
-                }
-              `;
-
-              await gql(replaceActorsMutation, {
-                assignableId: existingIssueId,
-                actorIds: [copilotActorId],
-                agentAssignment
-              });
-
-              await github.rest.issues.createComment({
-                owner,
-                repo,
-                issue_number: existing.number,
-                body: [
-                  "A new CI failure was detected for the same branch/SHA context.",
-                  "",
-                  `- Branch: ${branch}`,
-                  `- Commit SHA: ${sha}`,
-                  `- Workflow: ${workflowName}`,
-                  `- Failed Run: ${runUrl}`,
-                  "",
-                  "The issue has been reassigned to Copilot cloud agent with updated instructions."
-                ].join("\n")
-              });
-
-              core.info(`Updated and assigned existing issue #${existing.number} to Copilot cloud agent.`);
-              return;
-            }
-
-            // 3B) Create a brand new issue already assigned to Copilot agent
-            const createIssueMutation = `
-              mutation(
-                $repositoryId: ID!,
-                $title: String!,
-                $body: String!,
-                $assigneeIds: [ID!],
-                $agentAssignment: AgentAssignmentInput
-              ) {
-                createIssue(input: {
-                  repositoryId: $repositoryId,
-                  title: $title,
-                  body: $body,
-                  assigneeIds: $assigneeIds,
-                  agentAssignment: $agentAssignment
-                }) {
-                  issue {
-                    id
-                    number
-                    title
-                    url
-                    assignees(first: 10) {
-                      nodes {
-                        login
-                      }
-                    }
-                  }
-                }
-              }
-            `;
-
-            const createResp = await gql(createIssueMutation, {
-              repositoryId,
-              title,
-              body: issueBody,
-              assigneeIds: [copilotActorId],
-              agentAssignment
-            });
-
-            const createdIssue = createResp?.createIssue?.issue;
-            if (!createdIssue?.number) {
-              core.setFailed("Issue creation succeeded unexpectedly without returning an issue number.");
-              return;
-            }
-
-            // Labels still need REST after creation
-            await github.rest.issues.addLabels({
-              owner,
-              repo,
-              issue_number: createdIssue.number,
-              labels: ["copilot", "ci-fix"]
-            });
-
-            core.info(`Created issue #${createdIssue.number} and assigned it to Copilot cloud agent.`);
