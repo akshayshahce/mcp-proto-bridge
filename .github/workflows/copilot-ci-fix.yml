@@ -21,7 +21,7 @@ jobs:
 
     steps:
       - name: Create or update Copilot CI fix issue and assign to agent
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           COPILOT_TRIGGER_TOKEN: ${{ secrets.COPILOT_TRIGGER_TOKEN }}
           COPILOT_CUSTOM_AGENT: ${{ vars.COPILOT_CUSTOM_AGENT }}
