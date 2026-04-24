@@ -1,0 +1,47 @@
+name: enterprise-readiness
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+  schedule:
+    - cron: "0 6 * * 1"
+
+permissions:
+  contents: read
+
+jobs:
+  enterprise-readiness:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.24.x"
+          cache: true
+
+      - name: Run unit tests
+        run: go test ./...
+
+      - name: Run lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: v1.64.8
+
+      - name: Run fuzz smoke tests
+        run: |
+          go test ./tests -run '^$' -fuzz FuzzDecodeNoPanic -fuzztime=5s
+          go test ./tests -run '^$' -fuzz FuzzDecodeCustomExtractorNoPanic -fuzztime=5s
+
+      - name: Run benchmark smoke
+        run: go test ./tests -run '^$' -bench BenchmarkDecode -benchtime=50x -benchmem
+
+      - name: Run govulncheck
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...

@@ -19,6 +19,15 @@ That leaves Go microservices doing the same glue work repeatedly:
 
 This library makes that path boring and repeatable.
 
+## Problem It Solves
+
+`mcp-proto-bridge` removes repetitive and error-prone MCP payload glue code in Go services by standardizing:
+
+- payload extraction from `structuredContent` and text JSON
+- alias mapping between model-friendly fields and contract fields
+- strict/lenient decode behavior with clear errors
+- required field validation and typed decode into structs or protobuf
+
 ## Complements gRPC-to-MCP Tooling
 
 Tools such as `protoc-gen-go-mcp` help expose gRPC services as MCP servers.
@@ -71,6 +80,40 @@ func main() {
 	}
 }
 ```
+
+## Example Usage
+
+Use this library when a service consumes MCP tool output and needs a typed protobuf contract before business logic:
+
+```go
+result, err := mcpClient.FetchToolResult()
+if err != nil {
+	log.Fatal(err)
+}
+
+var rec recommendationpb.RecommendationResponse
+if err := bridge.DecodeProto(result, &rec, bridge.WithStrictMode(true)); err != nil {
+	log.Fatal(err)
+}
+
+applyPricing(rec)
+```
+
+See complete runnable examples in `examples/`.
+
+## Practical Microservice Flow
+
+Real service-style flow is provided in [`examples/practical_microservice_flow`](examples/practical_microservice_flow):
+
+```text
+service1 (MCP provider) -> MCP CallToolResult -> mcp-proto-bridge -> service2 typed protobuf logic
+```
+
+It includes:
+
+- real MCP server provider (`service1_mcp_provider`)
+- consumer service that decodes with `bridge.DecodeProto` (`service2_consumer`)
+- both text JSON and structuredContent tool-output paths
 
 ## Struct Decode
 
@@ -190,6 +233,15 @@ Detailed behavior contracts are documented in:
 
 - [`docs/api_behavior_matrix.md`](docs/api_behavior_matrix.md)
 - [`docs/operational_readiness.md`](docs/operational_readiness.md)
+- [`docs/production_readiness_checklist.md`](docs/production_readiness_checklist.md)
+- [`docs/branch_protection_setup.md`](docs/branch_protection_setup.md)
+- [`docs/release_checklist.md`](docs/release_checklist.md)
+
+Community and contribution docs:
+
+- [`CONTRIBUTING.md`](CONTRIBUTING.md)
+- [`CODE_OF_CONDUCT.md`](CODE_OF_CONDUCT.md)
+- [`SECURITY.md`](SECURITY.md)
 
 Output argument contract:
 

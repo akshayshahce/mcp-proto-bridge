@@ -1,0 +1,33 @@
+name: Feature request
+description: Propose an enhancement or new capability
+title: "feat: "
+labels:
+  - enhancement
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What user or platform problem are you trying to solve?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe the desired behavior and API shape.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: Other options and why they are less suitable.
+
+  - type: textarea
+    id: impact
+    attributes:
+      label: Compatibility and risk
+      description: Mention compatibility, migration, and operational impact.
