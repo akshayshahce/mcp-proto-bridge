@@ -9,8 +9,5 @@ linters:
     - govet
     - ineffassign
     - staticcheck
-    - unused
-
-issues:
-  exclude-use-default: false
+    - deadcode
 
