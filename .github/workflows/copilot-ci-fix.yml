@@ -13,7 +13,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Assign PR to Copilot
-        uses: actions/github-script@v8
+        uses: actions/github-script@v9
         env:
           COPILOT_ASSIGNEE: ${{ vars.COPILOT_ASSIGNEE }}
         with:
