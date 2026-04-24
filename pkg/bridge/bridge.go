@@ -274,7 +274,7 @@ func extractPayload(result *types.CallToolResult, cfg bridgeconfig.Config) (any,
 	}
 
 	ext := cfg.Extractor
-	mode := cfg.ExtractorMode
+	var mode string
 	if ext == nil {
 		textExtractor := extractor.FirstJSONTextExtractor{EnableIndentDetection: cfg.JSONIndentDetection}
 		preferStructured := cfg.PreferStructuredContent
