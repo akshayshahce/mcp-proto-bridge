@@ -7,10 +7,10 @@ import (
 	"errors"
 	"fmt"
 
-	"github.com/akshay/mcp-proto-bridge/pkg/bridge"
-	bridgeconfig "github.com/akshay/mcp-proto-bridge/pkg/config"
-	bridgeerrors "github.com/akshay/mcp-proto-bridge/pkg/errors"
-	"github.com/akshay/mcp-proto-bridge/pkg/types"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/bridge"
+	bridgeconfig "github.com/akshayshahce/mcp-proto-bridge/pkg/config"
+	bridgeerrors "github.com/akshayshahce/mcp-proto-bridge/pkg/errors"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/types"
 	"google.golang.org/protobuf/proto"
 )
 

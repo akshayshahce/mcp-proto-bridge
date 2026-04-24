@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package mcpprotobridge.examples.practical.v1;
 
-option go_package = "github.com/akshay/mcp-proto-bridge/examples/practical_microservice_flow/generated/recommendationpb;recommendationpb";
+option go_package = "github.com/akshayshahce/mcp-proto-bridge/examples/practical_microservice_flow/generated/recommendationpb;recommendationpb";
 
 message RecommendationResponse {
   int32 recommended_discount = 1;

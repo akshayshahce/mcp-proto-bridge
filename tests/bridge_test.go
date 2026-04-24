@@ -10,15 +10,15 @@ import (
 	"testing"
 	"time"
 
-	"github.com/akshay/mcp-proto-bridge/generated/fraudpb"
-	"github.com/akshay/mcp-proto-bridge/generated/orderpb"
-	"github.com/akshay/mcp-proto-bridge/pkg/bridge"
-	bridgeerrors "github.com/akshay/mcp-proto-bridge/pkg/errors"
-	"github.com/akshay/mcp-proto-bridge/pkg/extractor"
-	"github.com/akshay/mcp-proto-bridge/pkg/observe"
-	"github.com/akshay/mcp-proto-bridge/pkg/replay"
-	"github.com/akshay/mcp-proto-bridge/pkg/runtimecounters"
-	"github.com/akshay/mcp-proto-bridge/pkg/types"
+	"github.com/akshayshahce/mcp-proto-bridge/generated/fraudpb"
+	"github.com/akshayshahce/mcp-proto-bridge/generated/orderpb"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/bridge"
+	bridgeerrors "github.com/akshayshahce/mcp-proto-bridge/pkg/errors"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/extractor"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/observe"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/replay"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/runtimecounters"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/types"
 )
 
 type createOrder struct {

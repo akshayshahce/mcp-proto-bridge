@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 	"runtime"
 
-	"github.com/akshay/mcp-proto-bridge/pkg/types"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/types"
 )
 
 type Client struct {

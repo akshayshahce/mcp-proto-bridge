@@ -5,12 +5,12 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/akshay/mcp-proto-bridge/pkg/bridge"
-	bridgeerrors "github.com/akshay/mcp-proto-bridge/pkg/errors"
-	"github.com/akshay/mcp-proto-bridge/pkg/observe"
-	"github.com/akshay/mcp-proto-bridge/pkg/replay"
-	"github.com/akshay/mcp-proto-bridge/pkg/runtimecounters"
-	"github.com/akshay/mcp-proto-bridge/pkg/types"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/bridge"
+	bridgeerrors "github.com/akshayshahce/mcp-proto-bridge/pkg/errors"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/observe"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/replay"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/runtimecounters"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/types"
 )
 
 type createOrder struct {

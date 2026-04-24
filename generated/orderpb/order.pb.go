@@ -152,7 +152,7 @@ func file_proto_order_proto_init() {
 		Name:    proto.String("proto/order.proto"),
 		Package: proto.String("mcpprotobridge.examples.order.v1"),
 		Options: &descriptorpb.FileOptions{
-			GoPackage: proto.String("github.com/akshay/mcp-proto-bridge/generated/orderpb;orderpb"),
+			GoPackage: proto.String("github.com/akshayshahce/mcp-proto-bridge/generated/orderpb;orderpb"),
 		},
 		MessageType: []*descriptorpb.DescriptorProto{
 			{

@@ -1,4 +1,4 @@
-module github.com/akshay/mcp-proto-bridge
+module github.com/akshayshahce/mcp-proto-bridge
 
 go 1.24
 

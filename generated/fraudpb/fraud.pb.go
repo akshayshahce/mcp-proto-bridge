@@ -101,7 +101,7 @@ func file_proto_fraud_proto_init() {
 		Name:    proto.String("proto/fraud.proto"),
 		Package: proto.String("mcpprotobridge.examples.fraud.v1"),
 		Options: &descriptorpb.FileOptions{
-			GoPackage: proto.String("github.com/akshay/mcp-proto-bridge/generated/fraudpb;fraudpb"),
+			GoPackage: proto.String("github.com/akshayshahce/mcp-proto-bridge/generated/fraudpb;fraudpb"),
 		},
 		MessageType: []*descriptorpb.DescriptorProto{
 			{
@@ -147,4 +147,3 @@ func file_proto_fraud_proto_init() {
 	file_proto_fraud_proto_rawDesc = nil
 	file_proto_fraud_proto_goTypes = nil
 }
-

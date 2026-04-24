@@ -3,9 +3,9 @@ package main
 import (
 	"log"
 
-	"github.com/akshay/mcp-proto-bridge/generated/orderpb"
-	"github.com/akshay/mcp-proto-bridge/pkg/bridge"
-	"github.com/akshay/mcp-proto-bridge/pkg/types"
+	"github.com/akshayshahce/mcp-proto-bridge/generated/orderpb"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/bridge"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/types"
 )
 
 func main() {

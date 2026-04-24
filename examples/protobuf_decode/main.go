@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/akshay/mcp-proto-bridge/generated/orderpb"
-	"github.com/akshay/mcp-proto-bridge/pkg/bridge"
-	"github.com/akshay/mcp-proto-bridge/pkg/types"
+	"github.com/akshayshahce/mcp-proto-bridge/generated/orderpb"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/bridge"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/types"
 )
 
 func main() {
@@ -24,4 +24,3 @@ func main() {
 
 	fmt.Printf("discount=%d confidence=%.2f\n", response.GetRecommendedDiscount(), response.GetConfidence())
 }
-

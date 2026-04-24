@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/akshay/mcp-proto-bridge/generated/orderpb"
-	"github.com/akshay/mcp-proto-bridge/pkg/bridge"
-	"github.com/akshay/mcp-proto-bridge/pkg/types"
+	"github.com/akshayshahce/mcp-proto-bridge/generated/orderpb"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/bridge"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/types"
 )
 
 func main() {
@@ -32,4 +32,3 @@ func main() {
 
 	fmt.Printf("created order %s with status %s for %.2f\n", response.GetOrderId(), response.GetStatus(), response.GetAmount())
 }
-

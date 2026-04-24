@@ -5,7 +5,7 @@ package observe
 import (
 	"time"
 
-	bridgeerrors "github.com/akshay/mcp-proto-bridge/pkg/errors"
+	bridgeerrors "github.com/akshayshahce/mcp-proto-bridge/pkg/errors"
 )
 
 // Tracer receives stage start/finish notifications.

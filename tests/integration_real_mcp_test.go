@@ -12,10 +12,10 @@ import (
 	"runtime"
 	"testing"
 
-	"github.com/akshay/mcp-proto-bridge/generated/orderpb"
-	"github.com/akshay/mcp-proto-bridge/pkg/bridge"
-	bridgeerrors "github.com/akshay/mcp-proto-bridge/pkg/errors"
-	"github.com/akshay/mcp-proto-bridge/pkg/types"
+	"github.com/akshayshahce/mcp-proto-bridge/generated/orderpb"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/bridge"
+	bridgeerrors "github.com/akshayshahce/mcp-proto-bridge/pkg/errors"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/types"
 )
 
 type integrationOrderResponse struct {

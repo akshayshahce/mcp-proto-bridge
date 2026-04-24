@@ -1,6 +1,6 @@
 package testutil
 
-import "github.com/akshay/mcp-proto-bridge/pkg/types"
+import "github.com/akshayshahce/mcp-proto-bridge/pkg/types"
 
 // JSONTextResult returns a CallToolResult with one text content block.
 func JSONTextResult(text string) *types.CallToolResult {
@@ -10,4 +10,3 @@ func JSONTextResult(text string) *types.CallToolResult {
 		},
 	}
 }
-

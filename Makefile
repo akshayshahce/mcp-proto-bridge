@@ -10,7 +10,7 @@ lint:
 	golangci-lint run
 
 proto:
-	protoc --go_out=. --go_opt=module=github.com/akshay/mcp-proto-bridge proto/order.proto proto/fraud.proto
+	protoc --go_out=. --go_opt=module=github.com/akshayshahce/mcp-proto-bridge proto/order.proto proto/fraud.proto
 
 demo:
 	go run ./cmd/demo

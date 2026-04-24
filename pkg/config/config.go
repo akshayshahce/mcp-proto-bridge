@@ -2,8 +2,8 @@
 package config
 
 import (
-	"github.com/akshay/mcp-proto-bridge/pkg/extractor"
-	"github.com/akshay/mcp-proto-bridge/pkg/observe"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/extractor"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/observe"
 )
 
 // ErrorPolicyAction controls how specific decode errors should be handled.

@@ -7,8 +7,8 @@ import (
 	"fmt"
 	"reflect"
 
-	bridgeconfig "github.com/akshay/mcp-proto-bridge/pkg/config"
-	bridgeerrors "github.com/akshay/mcp-proto-bridge/pkg/errors"
+	bridgeconfig "github.com/akshayshahce/mcp-proto-bridge/pkg/config"
+	bridgeerrors "github.com/akshayshahce/mcp-proto-bridge/pkg/errors"
 )
 
 // ValidateResult enforces size and complexity limits on the incoming result.

@@ -4,10 +4,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/akshay/mcp-proto-bridge/generated/orderpb"
-	"github.com/akshay/mcp-proto-bridge/pkg/bridge"
-	"github.com/akshay/mcp-proto-bridge/pkg/extractor"
-	"github.com/akshay/mcp-proto-bridge/pkg/types"
+	"github.com/akshayshahce/mcp-proto-bridge/generated/orderpb"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/bridge"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/extractor"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/types"
 )
 
 // FuzzDecodeNoPanic ensures random MCP-like payloads never panic decode paths.

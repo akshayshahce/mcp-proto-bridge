@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package mcpprotobridge.examples.order.v1;
 
-option go_package = "github.com/akshay/mcp-proto-bridge/generated/orderpb;orderpb";
+option go_package = "github.com/akshayshahce/mcp-proto-bridge/generated/orderpb;orderpb";
 
 message RecommendationResponse {
   int32 recommended_discount = 1;

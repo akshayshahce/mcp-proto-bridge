@@ -10,13 +10,13 @@ import (
 	"strings"
 	"time"
 
-	bridgeconfig "github.com/akshay/mcp-proto-bridge/pkg/config"
-	bridgeerrors "github.com/akshay/mcp-proto-bridge/pkg/errors"
-	"github.com/akshay/mcp-proto-bridge/pkg/extractor"
-	"github.com/akshay/mcp-proto-bridge/pkg/mapper"
-	"github.com/akshay/mcp-proto-bridge/pkg/observe"
-	"github.com/akshay/mcp-proto-bridge/pkg/safety"
-	"github.com/akshay/mcp-proto-bridge/pkg/types"
+	bridgeconfig "github.com/akshayshahce/mcp-proto-bridge/pkg/config"
+	bridgeerrors "github.com/akshayshahce/mcp-proto-bridge/pkg/errors"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/extractor"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/mapper"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/observe"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/safety"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/types"
 	"google.golang.org/protobuf/proto"
 )
 

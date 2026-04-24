@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package mcpprotobridge.examples.fraud.v1;
 
-option go_package = "github.com/akshay/mcp-proto-bridge/generated/fraudpb;fraudpb";
+option go_package = "github.com/akshayshahce/mcp-proto-bridge/generated/fraudpb;fraudpb";
 
 message FraudCheckResponse {
   double risk_score = 1;

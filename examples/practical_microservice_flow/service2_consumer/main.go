@@ -3,9 +3,9 @@ package main
 import (
 	"log"
 
-	recommendationpb "github.com/akshay/mcp-proto-bridge/examples/practical_microservice_flow/generated/recommendationpb"
-	"github.com/akshay/mcp-proto-bridge/examples/practical_microservice_flow/shared/mcpclient"
-	"github.com/akshay/mcp-proto-bridge/pkg/bridge"
+	recommendationpb "github.com/akshayshahce/mcp-proto-bridge/examples/practical_microservice_flow/generated/recommendationpb"
+	"github.com/akshayshahce/mcp-proto-bridge/examples/practical_microservice_flow/shared/mcpclient"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/bridge"
 )
 
 func main() {

@@ -7,11 +7,12 @@
 package recommendationpb
 
 import (
-	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
-	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 	reflect "reflect"
 	sync "sync"
 	unsafe "unsafe"
+
+	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
+	protoimpl "google.golang.org/protobuf/runtime/protoimpl"
 )
 
 const (
@@ -91,7 +92,7 @@ const file_examples_practical_microservice_flow_proto_recommendation_proto_rawDe
 	"\n" +
 	"confidence\x18\x02 \x01(\x01R\n" +
 	"confidence\x12\x1a\n" +
-	"\bcampaign\x18\x03 \x01(\tR\bcampaignBuZsgithub.com/akshay/mcp-proto-bridge/examples/practical_microservice_flow/generated/recommendationpb;recommendationpbb\x06proto3"
+	"\bcampaign\x18\x03 \x01(\tR\bcampaignBuZsgithub.com/akshayshahce/mcp-proto-bridge/examples/practical_microservice_flow/generated/recommendationpb;recommendationpbb\x06proto3"
 
 var (
 	file_examples_practical_microservice_flow_proto_recommendation_proto_rawDescOnce sync.Once

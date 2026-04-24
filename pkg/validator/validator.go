@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"strings"
 
-	bridgeerrors "github.com/akshay/mcp-proto-bridge/pkg/errors"
+	bridgeerrors "github.com/akshayshahce/mcp-proto-bridge/pkg/errors"
 )
 
 // ValidateRequired checks struct fields tagged with `bridge:"required"` or

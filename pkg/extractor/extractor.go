@@ -9,8 +9,8 @@ import (
 	"io"
 	"strings"
 
-	bridgeerrors "github.com/akshay/mcp-proto-bridge/pkg/errors"
-	"github.com/akshay/mcp-proto-bridge/pkg/types"
+	bridgeerrors "github.com/akshayshahce/mcp-proto-bridge/pkg/errors"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/types"
 )
 
 // Extractor extracts a JSON-like payload from an MCP CallToolResult.

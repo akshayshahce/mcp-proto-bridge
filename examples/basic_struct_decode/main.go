@@ -4,8 +4,8 @@ import (
 	"fmt"
 	"log"
 
-	"github.com/akshay/mcp-proto-bridge/pkg/bridge"
-	"github.com/akshay/mcp-proto-bridge/pkg/types"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/bridge"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/types"
 )
 
 type CreateOrderResponse struct {

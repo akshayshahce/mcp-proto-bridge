@@ -9,9 +9,9 @@ import (
 	"reflect"
 	"sort"
 
-	bridgeconfig "github.com/akshay/mcp-proto-bridge/pkg/config"
-	bridgeerrors "github.com/akshay/mcp-proto-bridge/pkg/errors"
-	"github.com/akshay/mcp-proto-bridge/pkg/validator"
+	bridgeconfig "github.com/akshayshahce/mcp-proto-bridge/pkg/config"
+	bridgeerrors "github.com/akshayshahce/mcp-proto-bridge/pkg/errors"
+	"github.com/akshayshahce/mcp-proto-bridge/pkg/validator"
 	"google.golang.org/protobuf/encoding/protojson"
 	"google.golang.org/protobuf/proto"
 )
