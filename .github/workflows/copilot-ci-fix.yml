@@ -27,7 +27,7 @@ jobs:
           COPILOT_CUSTOM_AGENT: ${{ vars.COPILOT_CUSTOM_AGENT }}
           COPILOT_MODEL: ${{ vars.COPILOT_MODEL }}
         with:
-          github-token: ${{ secrets.COPILOT_TRIGGER_TOKEN }}
+          github-token: ${{ secrets.COPILOT_TRIGGER_TOKEN || github.token }}
           script: |
             const wr = context.payload.workflow_run ?? {};
             const owner = context.repo.owner;
