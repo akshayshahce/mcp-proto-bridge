@@ -9,5 +9,4 @@ linters:
     - govet
     - ineffassign
     - staticcheck
-    - deadcode
 
