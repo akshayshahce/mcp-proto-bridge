@@ -42,6 +42,14 @@ MCP tool response -> typed Go/protobuf response -> internal gRPC-native service
 
 ```mermaid
 flowchart LR
+    S1["Service1 (MCP Tool)"] --> MCP["MCP Response"]
+    MCP --> BR["mcp-proto-bridge"]
+    BR --> PROTO["Typed Protobuf"]
+    PROTO --> S2["Service2 (Go Microservice)"]
+```
+
+```mermaid
+flowchart LR
     A["MCP CallToolResult"] --> B["Extractor"]
     B --> C["Normalized JSON-like payload"]
     C --> D["Alias mapper"]
